@@ -1,0 +1,49 @@
+name:                pure-zlib
+version:             0.3
+synopsis:            A Haskell-only implementation of zlib / DEFLATE
+homepage:            http://github.com/GaloisInc/pure-zlib
+license:             BSD3
+license-file:        LICENSE
+author:              Adam Wick
+maintainer:          awick@galois.com
+category:            Codec
+build-type:          Simple
+cabal-version:       >=1.10
+description:         A Haskell-only implementation of the zlib / DEFLATE
+                     protocol. Currently only implements the decompression
+                     algorithm.
+
+library
+  default-language:   Haskell2010
+  ghc-options:        -Wall
+  hs-source-dirs:     src
+  build-depends:
+                      base                       >= 4.7   && < 5.0,
+                      bytestring                 >= 0.10  && < 0.11,
+                      containers                 >= 0.5   && < 0.7,
+                      fingertree                 >= 0.1   && < 0.3,
+                      monadLib                   >= 3.7   && < 3.9
+  exposed-modules:
+                      Codec.Compression.Zlib,
+                      Codec.Compression.Zlib.Adler32,
+                      Codec.Compression.Zlib.Deflate,
+                      Codec.Compression.Zlib.HuffmanTree,
+                      Codec.Compression.Zlib.Monad,
+                      Codec.Compression.Zlib.OutputWindow
+
+test-suite test-zlib
+  type:               exitcode-stdio-1.0
+  main-is:            Test.hs
+  ghc-options:        -Wall
+  hs-source-dirs:     test
+  default-language:   Haskell2010
+  ghc-options:        -fno-warn-orphans
+  build-depends:
+                      base                       >= 4.7   && < 5.0,
+                      bytestring                 >= 0.10  && < 0.11,
+                      pure-zlib                  >= 0.3   && < 1.1,
+                      HUnit                      >= 1.2   && < 1.4,
+                      QuickCheck                 >= 2.7   && < 2.9,
+                      test-framework             >= 0.8   && < 0.10,
+                      test-framework-hunit       >= 0.3   && < 0.5,
+                      test-framework-quickcheck2 >= 0.3   && < 0.5
