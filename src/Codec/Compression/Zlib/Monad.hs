@@ -34,11 +34,11 @@ import MonadLib
 import MonadLib.Monads
 
 data DecompressState = DecompressState {
-       dcsNextBitNo     :: Int
-     , dcsCurByte       :: Word8
-     , dcsAdler32       :: AdlerState
-     , dcsInput         :: ByteString
-     , dcsOutput        :: OutputWindow
+       dcsNextBitNo     :: !Int
+     , dcsCurByte       :: !Word8
+     , dcsAdler32       :: !AdlerState
+     , dcsInput         :: !ByteString
+     , dcsOutput        :: !OutputWindow
      }
 
 type DeflateM = State DecompressState

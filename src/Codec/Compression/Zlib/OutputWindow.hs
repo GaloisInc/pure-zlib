@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Codec.Compression.Zlib.OutputWindow(
@@ -21,8 +22,8 @@ import Data.Monoid
 import Data.Word
 
 data OutputWindow = OutputWindow {
-       owCommitted :: FingerTree Int SBS.ByteString
-     , owRecent    :: Builder
+       owCommitted :: !(FingerTree Int SBS.ByteString)
+     , owRecent    :: !Builder
      }
 
 instance Monoid Int where
@@ -36,13 +37,13 @@ emptyWindow :: OutputWindow
 emptyWindow = OutputWindow empty mempty
 
 addByte :: OutputWindow -> Word8 -> OutputWindow
-addByte ow b = ow{ owRecent = owRecent ow <> word8 b }
+addByte !ow !b = ow{ owRecent = owRecent ow <> word8 b }
 
 addChunk :: OutputWindow -> ByteString -> OutputWindow
-addChunk ow bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
+addChunk !ow !bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
 
 addOldChunk :: OutputWindow -> Int -> Int64 -> (OutputWindow, ByteString)
-addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
+addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
  where
   output      = owCommitted ow |> BS.toStrict (toLazyByteString (owRecent ow))
   dropAmt     = measure output - dist
