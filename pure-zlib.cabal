@@ -31,6 +31,15 @@ library
                       Codec.Compression.Zlib.Monad,
                       Codec.Compression.Zlib.OutputWindow
 
+executable deflate
+  default-language:   Haskell2010
+  main-is:            Deflate.hs
+  ghc-options:        -Wall
+  build-depends:
+                      base                       >= 4.7   && < 5.0,
+                      bytestring                 >= 0.10  && < 0.11,
+                      pure-zlib                  >= 0.3   && < 0.5
+
 test-suite test-zlib
   type:               exitcode-stdio-1.0
   main-is:            Test.hs
