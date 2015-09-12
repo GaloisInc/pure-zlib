@@ -1,5 +1,5 @@
 name:                pure-zlib
-version:             0.3
+version:             0.4
 synopsis:            A Haskell-only implementation of zlib / DEFLATE
 homepage:            http://github.com/GaloisInc/pure-zlib
 license:             BSD3
@@ -30,6 +30,10 @@ library
                       Codec.Compression.Zlib.HuffmanTree,
                       Codec.Compression.Zlib.Monad,
                       Codec.Compression.Zlib.OutputWindow
+  default-extensions:
+                      BangPatterns,
+                      MultiParamTypeClasses,
+                      MultiWayIf
 
 executable deflate
   default-language:   Haskell2010
