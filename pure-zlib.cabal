@@ -47,3 +47,8 @@ test-suite test-zlib
                       test-framework             >= 0.8   && < 0.10,
                       test-framework-hunit       >= 0.3   && < 0.5,
                       test-framework-quickcheck2 >= 0.3   && < 0.5
+
+source-repository head
+  type: git
+  location: git://github.com/GaloisInc/pure-zlib.git
+
