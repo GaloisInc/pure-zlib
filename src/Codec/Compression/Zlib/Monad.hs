@@ -1,6 +1,9 @@
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Codec.Compression.Zlib.Monad(
          DeflateM
        , runDeflateM
+       , DecompressionError(..)
          -- * Getting data from the input stream.
        , nextBit
        , nextBits
@@ -24,14 +27,15 @@ module Codec.Compression.Zlib.Monad(
 import Codec.Compression.Zlib.Adler32
 import Codec.Compression.Zlib.HuffmanTree
 import Codec.Compression.Zlib.OutputWindow
+import Control.Exception(Exception)
 import Control.Monad
 import Data.Bits
 import Data.ByteString.Lazy(ByteString)
 import qualified Data.ByteString.Lazy as BS
 import Data.Int
+import Data.Typeable
 import Data.Word
 import MonadLib
-import MonadLib.Monads
 
 data DecompressState = DecompressState {
        dcsNextBitNo     :: !Int
@@ -41,7 +45,35 @@ data DecompressState = DecompressState {
      , dcsOutput        :: !OutputWindow
      }
 
-type DeflateM = State DecompressState
+data DecompressionError = HuffmanTreeError   String
+                        | FormatError        String
+                        | DecompressionError String
+                        | HeaderError        String
+                        | ChecksumError      String
+  deriving (Typeable, Eq)
+
+instance Show DecompressionError where
+  show x =
+    case x of
+      HuffmanTreeError   s -> "Huffman tree manipulation error: " ++ s
+      FormatError        s -> "Block format error: " ++ s
+      DecompressionError s -> "Decompression error: " ++ s
+      HeaderError        s -> "Header error: " ++ s
+      ChecksumError      s -> "Checksum error: " ++ s
+
+instance Exception DecompressionError
+
+newtype DeflateM a = DeflateM (StateT DecompressState
+                                (ExceptionT DecompressionError Id)
+                                a)
+ deriving (Applicative, Functor, Monad)
+
+instance StateM DeflateM DecompressState where
+  get   = DeflateM get
+  set x = DeflateM (set x)
+
+instance ExceptionM DeflateM DecompressionError where
+  raise e = DeflateM (lift (raise e))
 
 initialState :: ByteString -> DecompressState
 initialState bstr =
@@ -49,9 +81,11 @@ initialState bstr =
     Nothing       -> error "No compressed data to inflate."
     Just (f,rest) -> DecompressState 0 f initialAdlerState rest emptyWindow
 
-runDeflateM :: Show a => DeflateM a -> ByteString -> a
-runDeflateM m i = result
-  where (result, _) = runState (initialState i) m
+runDeflateM :: DeflateM a -> ByteString -> Either DecompressionError a
+runDeflateM (DeflateM m) i =
+  case runId (runExceptionT (runStateT (initialState i) m)) of
+    Left err       -> Left err
+    Right (res, _) -> Right res
 
 -- -----------------------------------------------------------------------------
 
@@ -97,8 +131,8 @@ nextByte =
 
 nextWord16 :: DeflateM Word16
 nextWord16 =
-  do high <- fromIntegral `fmap` nextByte
-     low  <- fromIntegral `fmap` nextByte
+  do low  <- fromIntegral `fmap` nextByte
+     high <- fromIntegral `fmap` nextByte
      return ((high `shiftL` 8) .|. low)
 
 nextBlock :: Integral a => a -> DeflateM ByteString
@@ -119,8 +153,9 @@ nextCode :: Show a => HuffmanTree a -> DeflateM a
 nextCode tree =
   do b <- nextBit
      case advanceTree b tree of
-       Left tree' -> nextCode tree'
-       Right x    -> return x
+       AdvanceError str -> raise (HuffmanTreeError str)
+       NewTree tree'    -> nextCode tree'
+       Result x         -> return x
 
 readRest :: DeflateM ByteString
 readRest =

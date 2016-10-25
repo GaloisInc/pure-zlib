@@ -12,8 +12,8 @@ main =
          if ".z" `isSuffixOf` ifile
            then do bstr <- readFile ifile
                    case decompress bstr of
-                     Nothing -> putStrLn "Decompression failure."
-                     Just o  -> writeFile (take (length ifile - 2) ifile) o
+                     Left  err -> putStrLn (show err)
+                     Right bs  -> writeFile (take (length ifile - 2) ifile) bs
            else putStrLn "Unexpected file name."
        _ ->
          putStrLn "USAGE: deflate [filename]"

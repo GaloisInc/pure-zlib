@@ -33,6 +33,8 @@ library
                       Codec.Compression.Zlib.OutputWindow
   default-extensions:
                       BangPatterns,
+                      DeriveDataTypeable,
+                      GeneralizedNewtypeDeriving,
                       MultiParamTypeClasses,
                       MultiWayIf
 

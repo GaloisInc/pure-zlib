@@ -1,5 +1,6 @@
 module Codec.Compression.Zlib.HuffmanTree(
          HuffmanTree
+       , AdvanceResult(..)
        , createHuffmanTree
        , advanceTree
        )
@@ -12,37 +13,59 @@ data HuffmanTree a = HuffmanNode (HuffmanTree a) (HuffmanTree a)
                    | HuffmanEmpty
  deriving (Show)
 
+data AdvanceResult a = AdvanceError String
+                     | NewTree (HuffmanTree a)
+                     | Result a
+
 emptyHuffmanTree :: HuffmanTree a
 emptyHuffmanTree = HuffmanEmpty
 
-createHuffmanTree :: Show a => [(a, Int, Int)] -> HuffmanTree a
-createHuffmanTree = foldr addHuffmanNode' emptyHuffmanTree
- where addHuffmanNode' (a, b, c) = addHuffmanNode a b c
+createHuffmanTree :: Show a =>
+                     [(a, Int, Int)] ->
+                     Either String (HuffmanTree a)
+createHuffmanTree = foldr addHuffmanNode' (Right emptyHuffmanTree)
+ where addHuffmanNode' (a, b, c) acc =
+         case acc of
+           Left err   -> Left err
+           Right tree -> addHuffmanNode a b c tree
 
-addHuffmanNode :: Show a => a -> Int -> Int -> HuffmanTree a -> HuffmanTree a
-addHuffmanNode val 0   _    (HuffmanNode _ _) =
-  error ("Tried to add where the leaf is a node: " ++ show val)
-addHuffmanNode _   0   _    (HuffmanValue _) =
-  error "Two values point to the same place!"
-addHuffmanNode val 0   _    HuffmanEmpty =
-  HuffmanValue val
-addHuffmanNode val len code (HuffmanNode l r)
-  | testBit code (len - 1) = HuffmanNode l (addHuffmanNode val (len - 1) code r)
-  | otherwise              = HuffmanNode (addHuffmanNode val (len - 1) code l) r
-addHuffmanNode _   _   _    (HuffmanValue _) =
-  error "HuffmanValue hit while inserting a value!"
-addHuffmanNode val len code HuffmanEmpty =
-  let newNode = addHuffmanNode val (len - 1) code HuffmanEmpty
-  in if testBit code (len - 1)
-        then HuffmanNode HuffmanEmpty newNode
-        else HuffmanNode newNode      HuffmanEmpty
+addHuffmanNode :: Show a =>
+                  a -> Int -> Int -> HuffmanTree a ->
+                  Either String (HuffmanTree a)
+addHuffmanNode val len code node =
+  case node of
+    HuffmanEmpty    | len == 0 ->
+      Right (HuffmanValue val)
+    HuffmanEmpty ->
+      case addHuffmanNode val (len - 1) code HuffmanEmpty of
+        Left err -> Left err
+        Right newNode
+          | testBit code (len - 1) -> Right (HuffmanNode HuffmanEmpty newNode)
+          | otherwise              -> Right (HuffmanNode newNode      HuffmanEmpty)
+    --
+    HuffmanValue _  | len == 0 ->
+      Left "Two values point to the same place!"
+    HuffmanValue _ ->
+      Left "HuffmanValue hit while inserting a value!"
+    --
+    HuffmanNode _ _ | len == 0 ->
+      Left ("Tried to add where the leaf is a node: " ++ show val)
+    HuffmanNode l r | testBit code (len - 1) ->
+      case addHuffmanNode val (len - 1) code r of
+        Left err -> Left err
+        Right r' -> Right (HuffmanNode l r')
+    HuffmanNode l r ->
+      case addHuffmanNode val (len - 1) code l of
+        Left err -> Left err
+        Right l' -> Right (HuffmanNode l' r)
 
-advanceTree :: Bool -> HuffmanTree a -> Either (HuffmanTree a) a
-advanceTree _ HuffmanEmpty     = error "Tried to advance empty tree!"
-advanceTree _ (HuffmanValue _) = error "Tried to advance empty value!"
-advanceTree x (HuffmanNode l r) =
-  case if x then r else l of
-    HuffmanEmpty   -> error "Advanced to empty tree!"
-    HuffmanValue y -> Right y
-    t              -> Left t
-
+advanceTree :: Bool -> HuffmanTree a -> AdvanceResult a
+advanceTree x node =
+  case node of
+    HuffmanEmpty     -> AdvanceError "Tried to advance empty tree!"
+    HuffmanValue _   -> AdvanceError "Tried to advance value!"
+    HuffmanNode  l r ->
+      case if x then r else l of
+        HuffmanEmpty   -> AdvanceError "Advanced to empty tree!"
+        HuffmanValue y -> Result y
+        t              -> NewTree t

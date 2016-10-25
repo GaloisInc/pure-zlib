@@ -16,21 +16,27 @@ import Data.List
 import Data.Map.Strict(Map)
 import qualified Data.Map.Strict as Map
 import Data.Word
+import MonadLib(raise)
 
-inflate :: DeflateM (Maybe ByteString)
+inflate :: DeflateM ByteString
 inflate =
   do isFinal <- inflateBlock
      if isFinal
-        then do advanceToByte
-                rest     <- readRest
-                ourAdler <- finalAdler
-                result   <- finalOutput
-                let theirAdler = BS.foldl shiftAdd 0 rest
-                if | BS.length rest /= 4    -> return Nothing
-                   | theirAdler /= ourAdler -> return Nothing
-                   | otherwise              -> return (Just result)
+        then checkChecksum >> finalOutput
         else inflate
- where shiftAdd x y = (x `shiftL` 8) .|. fromIntegral y
+ where
+  shiftAdd x y = (x `shiftL` 8) .|. fromIntegral y
+  --
+  checkChecksum =
+    do advanceToByte
+       rest     <- readRest
+       ourAdler <- finalAdler
+       let theirAdler = BS.foldl shiftAdd 0 rest
+       if | BS.length rest < 4     -> raise (ChecksumError "checksum missing")
+          | BS.length rest > 4     -> raise (FormatError "Ends in middle of file")
+          | theirAdler /= ourAdler -> raise (ChecksumError "checksum mismatch")
+          | otherwise              -> return ()
+
 
 inflateBlock :: DeflateM Bool
 inflateBlock =
@@ -42,11 +48,13 @@ inflateBlock =
             len  <- nextWord16
             nlen <- nextWord16
             unless (len == complement nlen) $
-              fail "Len/nlen mismatch in uncompressed block."
+              raise (FormatError "Len/nlen mismatch in uncompressed block.")
             emitBlock =<< nextBlock len
             return bfinal
        1 -> -- compressed with fixed Huffman codes
-         do runInflate fixedLitTree fixedDistanceTree
+         do flt <- fixedLitTree
+            fdt <- fixedDistanceTree
+            runInflate flt fdt
             return bfinal
        2 -> -- compressed with dynamic Huffman codes
          do hlit  <- (257+) `fmap` nextBits 5
@@ -54,7 +62,7 @@ inflateBlock =
             hclen <- (4+)   `fmap` nextBits 4
             codeLens <- replicateM hclen (nextBits 3)
             let codeLens' = zip codeLengthOrder codeLens
-                codeTree  = computeHuffmanTree codeLens'
+            codeTree <- computeHuffmanTree codeLens'
             lens <- getCodeLengths codeTree 0 (hlit + hdist) 0 Map.empty
             -- We do this as a big chunk and then split it up because the spec
             -- allows repeat codes to cross the hlit / hdist boundary. So now we
@@ -62,12 +70,12 @@ inflateBlock =
             let (litlens, offdistlens) =
                     Map.partitionWithKey (\ k _ -> k < hlit) lens
                 distlens = Map.mapKeys (\ k -> k - hlit) offdistlens
-                litTree  = computeHuffmanTree (Map.toList litlens)
-                distTree = computeHuffmanTree (Map.toList distlens)
+            litTree  <- computeHuffmanTree (Map.toList litlens)
+            distTree <- computeHuffmanTree (Map.toList distlens)
             runInflate litTree distTree
             return bfinal
        _ -> -- reserved / error
-         error ("Unacceptable BTYPE: " ++ show btype)
+         raise (FormatError ("Unacceptable BTYPE: " ++ show btype))
  where
   runInflate :: HuffmanTree Int -> HuffmanTree Int -> DeflateM ()
   runInflate litTree distTree =
@@ -113,7 +121,7 @@ getCodeLengths tree n maxl prev acc
 getLength :: Int -> DeflateM Int64
 getLength c =
   case Map.lookup c getLengthMap of
-    Nothing -> error ("getLength for bad code: " ++ show c)
+    Nothing -> raise (DecompressionError ("getLength for bad code: "++show c))
     Just m  -> m
 
 getLengthMap :: Map Int (DeflateM Int64)
@@ -152,7 +160,7 @@ getLengthMap = Map.fromList [
 getDistance :: Int -> DeflateM Int
 getDistance c =
   case Map.lookup c getDistanceMap of
-    Nothing -> error ("getDistance for bad code: " ++ show c)
+    Nothing -> raise (DecompressionError ("getDistance for bad code: "++show c))
     Just m  -> m
 
 getDistanceMap :: Map Int (DeflateM Int)
@@ -191,20 +199,23 @@ getDistanceMap = Map.fromList [
 
 -- -----------------------------------------------------------------------------
 
-fixedLitTree :: HuffmanTree Int
+fixedLitTree :: DeflateM (HuffmanTree Int)
 fixedLitTree = computeHuffmanTree
   ([(x, 8) | x <- [0   .. 143]] ++
    [(x, 9) | x <- [144 .. 255]] ++
    [(x, 7) | x <- [256 .. 279]] ++
    [(x, 8) | x <- [280 .. 287]])
 
-fixedDistanceTree :: HuffmanTree Int
+fixedDistanceTree :: DeflateM (HuffmanTree Int)
 fixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
 
 -- -----------------------------------------------------------------------------
 
-computeHuffmanTree :: [(Int, Int)] -> HuffmanTree Int
-computeHuffmanTree = createHuffmanTree . computeCodeValues
+computeHuffmanTree :: [(Int, Int)] -> DeflateM (HuffmanTree Int)
+computeHuffmanTree initialData =
+  case createHuffmanTree (computeCodeValues initialData) of
+    Left  err -> raise (HuffmanTreeError err)
+    Right x   -> return x
 
 computeCodeValues :: Ord a => [(a, Int)] -> [(a, Int, Int)]
 computeCodeValues vals = Map.foldrWithKey (\ v (l, c) a -> (v,l,c):a) [] codes
