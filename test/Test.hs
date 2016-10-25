@@ -1,7 +1,13 @@
+import Codec.Compression.Zlib
 import Codec.Compression.Zlib.Deflate
-import Test.Framework
-import Test.Framework.Providers.HUnit
-import Test.HUnit(assertEqual)
+import Data.ByteString.Lazy(readFile)
+import Data.List(last, isPrefixOf)
+import Prelude hiding (readFile)
+import System.FilePath
+import Test.Tasty
+import Test.Tasty.HUnit
+
+-- -----------------------------------------------------------------------------
 
 rfcSimpleTestLengths :: [(Char, Int)]
 rfcSimpleTestLengths = [
@@ -41,17 +47,51 @@ fixedHuffmanResults =
    [(fst x, 7, snd x) | x <- zip [256..279] [0  .. 23]] ++ --   0000000 through   0010111
    [(fst x, 8, snd x) | x <- zip [280..287] [192..199]])   --  11000000 through  11000111
 
-zlibTests :: Test
+-- -----------------------------------------------------------------------------
+
+testCases :: [FilePath]
+testCases = [ "randtest1", "randtest2", "randtest3",
+              "rfctest1",  "rfctest2",  "rfctest3",
+              "zerotest1", "zerotest2", "zerotest3" ]
+
+buildGoldTestCases :: IO TestTree
+buildGoldTestCases =
+  do trees <- mapM buildGoldTest testCases
+     return (testGroup "Decompression Tests" trees)
+
+buildGoldTest :: FilePath -> IO TestTree
+buildGoldTest test =
+  do let compressedFile = "test" </> "test-cases" </> test <.> "z"
+         goldFile       = "test" </> "test-cases" </> test <.> "gold"
+     compressedBStr <- readFile compressedFile
+     goldBStr       <- readFile goldFile
+     return (testCase (toTestCaseName test)
+              (assertEqual test (Right goldBStr) (decompress compressedBStr)))
+
+toTestCaseName :: FilePath -> String
+toTestCaseName fpath = prefix ++ suffix
+ where
+  prefix | "zero" `isPrefixOf` fpath = "Zero test #"
+         | "rand" `isPrefixOf` fpath = "Random test #"
+         | "rfc"  `isPrefixOf` fpath = "RFC test #"
+         | otherwise                 = error "Bad test case prefix."
+  suffix = [last fpath]
+
+-- -----------------------------------------------------------------------------
+
+zlibTests :: IO TestTree
 zlibTests =
-  testGroup "DEFLATE / ZLib Algorithm Testing" [
-    testCase "RFC 1951 Code Generation Test"
-      (assertEqual "" (computeCodeValues rfcSimpleTestLengths)
-                      rfcSimpleTestResults)
-  , testCase "Fixed Huffman lengths make right tree"
-      (assertEqual "" (computeCodeValues fixedHuffmanLengths)
-                      fixedHuffmanResults)
-  ]
+  do decompTests <- buildGoldTestCases
+     return $ testGroup "DEFLATE / ZLib Algorithm Testing" [
+                  testCase "RFC 1951 Code Generation Test"
+                    (assertEqual "" (computeCodeValues rfcSimpleTestLengths)
+                                    rfcSimpleTestResults)
+                , testCase "Fixed Huffman lengths make right tree"
+                    (assertEqual "" (computeCodeValues fixedHuffmanLengths)
+                                    fixedHuffmanResults)
+                , decompTests
+                ]
 
 main :: IO ()
-main = defaultMain [zlibTests]
+main = defaultMain =<< zlibTests
 
