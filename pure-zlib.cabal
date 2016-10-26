@@ -18,12 +18,13 @@ library
   ghc-options:        -Wall
   hs-source-dirs:     src
   build-depends:
-                      base                       >= 4.6   && < 5.0,
-                      bytestring                 >= 0.10  && < 0.11,
-                      bytestring-builder         >= 0.10  && < 0.11,
-                      containers                 >= 0.5   && < 0.7,
-                      fingertree                 >= 0.1   && < 0.3,
-                      monadLib                   >= 3.7   && < 3.9
+                      base               >= 4.6   && < 5.0,
+                      base-compat        >= 0.9.1 && < 0.11,
+                      bytestring         >= 0.10  && < 0.11,
+                      bytestring-builder >= 0.10  && < 0.11,
+                      containers         >= 0.5   && < 0.7,
+                      fingertree         >= 0.1   && < 0.3,
+                      monadLib           >= 3.7   && < 3.9
   exposed-modules:
                       Codec.Compression.Zlib,
                       Codec.Compression.Zlib.Adler32,
@@ -43,9 +44,10 @@ executable deflate
   main-is:            Deflate.hs
   ghc-options:        -Wall
   build-depends:
-                      base                       >= 4.6   && < 5.0,
-                      bytestring                 >= 0.10  && < 0.11,
-                      pure-zlib                  >= 0.5   && < 0.8
+                      base        >= 4.6   && < 5.0,
+                      base-compat >= 0.9.1 && < 0.11,
+                      bytestring  >= 0.10  && < 0.11,
+                      pure-zlib   >= 0.5   && < 0.8
 
 test-suite test-zlib
   type:               exitcode-stdio-1.0
@@ -56,6 +58,7 @@ test-suite test-zlib
   ghc-options:        -fno-warn-orphans
   build-depends:
                       base             >= 4.6      && < 5.0,
+                      base-compat      >= 0.9.1    && < 0.11,
                       bytestring       >= 0.10     && < 0.11,
                       filepath         >= 1.4.1    && < 1.6,
                       HUnit            >= 1.2      && < 1.4,
