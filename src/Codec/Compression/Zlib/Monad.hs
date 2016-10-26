@@ -36,6 +36,8 @@ import Data.Int
 import Data.Typeable
 import Data.Word
 import MonadLib
+import Prelude()
+import Prelude.Compat
 
 data DecompressState = DecompressState {
        dcsNextBitNo     :: !Int
