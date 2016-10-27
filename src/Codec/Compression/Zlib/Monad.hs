@@ -3,6 +3,7 @@
 module Codec.Compression.Zlib.Monad(
          DeflateM
        , runDeflateM
+       , raise
        , DecompressionError(..)
          -- * Getting data from the input stream.
        , nextBit
@@ -35,11 +36,10 @@ import qualified Data.ByteString.Lazy as BS
 import Data.Int
 import Data.Typeable
 import Data.Word
-import MonadLib
 import Prelude()
 import Prelude.Compat
 
-data DecompressState = DecompressState {
+data DecompressionState = DecompressionState {
        dcsNextBitNo     :: !Int
      , dcsCurByte       :: !Word8
      , dcsAdler32       :: !AdlerState
@@ -65,29 +65,49 @@ instance Show DecompressionError where
 
 instance Exception DecompressionError
 
-newtype DeflateM a = DeflateM (StateT DecompressState
-                                (ExceptionT DecompressionError Id)
-                                a)
- deriving (Applicative, Functor, Monad)
+type DeflateState = Either DecompressionError DecompressionState
 
-instance StateM DeflateM DecompressState where
-  get   = DeflateM get
-  set x = DeflateM (set x)
+newtype DeflateM a = DeflateM { unDeflateM :: DeflateState -> (a,DeflateState) }
 
-instance ExceptionM DeflateM DecompressionError where
-  raise e = DeflateM (lift (raise e))
+instance Applicative DeflateM where
+  pure x = DeflateM (\ s -> (x, s))
+  (<*>)  = ap
 
-initialState :: ByteString -> DecompressState
+instance Functor DeflateM where
+  fmap f m = DeflateM (\ s -> case unDeflateM m s of
+                                (_, Left err) -> (error "ignore fmap", Left err)
+                                (x, Right s') -> (f x, Right s'))
+
+instance Monad DeflateM where
+  return x = DeflateM (\ s -> (x, s))
+  m >>= f  = DeflateM (\ s -> case unDeflateM m s of
+                                (_, Left err) -> (error "ignore bind", Left err)
+                                (x, st') -> unDeflateM (f x) st')
+
+get :: DeflateM DecompressionState
+get = DeflateM (\ s -> case s of
+                         Left _ -> (error "used error get()", s)
+                         Right st -> (st, s))
+
+set :: DecompressionState -> DeflateM ()
+set st = DeflateM (\ s -> case s of
+                            Left _ -> ((), s)
+                            Right _  -> ((), Right st))
+
+raise :: DecompressionError -> DeflateM a
+raise e = DeflateM (\ _ -> (error "used error raise()", Left e))
+
+initialState :: ByteString -> DecompressionState
 initialState bstr =
   case BS.uncons bstr of
     Nothing       -> error "No compressed data to inflate."
-    Just (f,rest) -> DecompressState 0 f initialAdlerState rest emptyWindow
+    Just (f,rest) -> DecompressionState 0 f initialAdlerState rest emptyWindow
 
 runDeflateM :: DeflateM a -> ByteString -> Either DecompressionError a
-runDeflateM (DeflateM m) i =
-  case runId (runExceptionT (runStateT (initialState i) m)) of
-    Left err       -> Left err
-    Right (res, _) -> Right res
+runDeflateM m i =
+  case unDeflateM m (Right (initialState i)) of
+    (x, Right _) -> Right x
+    (_, Left  e) -> Left e
 
 -- -----------------------------------------------------------------------------
 
