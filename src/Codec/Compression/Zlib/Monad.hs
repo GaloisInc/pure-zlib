@@ -77,13 +77,13 @@ instance Exception DecompressionError
 
 -- -----------------------------------------------------------------------------
 
-data DeflateState a = Running   !a
-                    | Dead      !DecompressionError
-                    | NeedsData !(S.ByteString -> DeflateM a)
-                    | HaveChunk !S.ByteString !(DeflateM a)
+data DeflateState a = Running   !DecompressionState !a
+                    | Dead      !DecompressionState !DecompressionError
+                    | NeedsData !DecompressionState !(S.ByteString -> DeflateM a)
+                    | HaveChunk !DecompressionState !S.ByteString !(DeflateM a)
 
 newtype DeflateM a = DeflateM {
-    unDeflateM :: DecompressionState -> (DecompressionState, DeflateState a)
+    unDeflateM :: DecompressionState -> DeflateState a
   }
 
 instance Applicative DeflateM where
@@ -95,26 +95,24 @@ instance Functor DeflateM where
                 return (f x)
 
 instance Monad DeflateM where
-  return x = DeflateM $ \ st -> (st, Running x)
+  {-# INLINE return #-}
+  return x = DeflateM $ \ st -> Running st x
+  {-# INLINE (>>=) #-}
   m >>= f  = DeflateM $ \ st ->
                case unDeflateM m st of
-                 (st', Running   x)        ->
-                   unDeflateM (f x) st'
-                 (st', Dead      e)        ->
-                   (st', Dead e)
-                 (st', NeedsData fill)     ->
-                   (st', NeedsData (\ b -> fill b >>= f))
-                 (st', HaveChunk c resume) ->
-                   (st', HaveChunk c (resume >>= f))
+                 Running   st' x        -> unDeflateM (f x) st'
+                 Dead      st' e        -> Dead st' e
+                 NeedsData st' fill     -> NeedsData st' (\ b -> fill b >>= f)
+                 HaveChunk st' c resume -> HaveChunk st' c (resume >>= f)
 
 get :: DeflateM DecompressionState
-get = DeflateM (\ s -> (s, Running s))
+get = DeflateM (\ s -> Running s s)
 
 set :: DecompressionState -> DeflateM ()
-set st = DeflateM (\ _ -> (st, Running ()))
+set st = DeflateM (\ _ -> Running st ())
 
 raise :: DecompressionError -> DeflateM a
-raise e = DeflateM (\ st -> (st, Dead e))
+raise e = DeflateM (\ st -> Dead st e)
 
 initialState :: DecompressionState
 initialState = DecompressionState {
@@ -138,15 +136,15 @@ runDeflateM m = runDeflateM' initialState m
 runDeflateM' :: DecompressionState -> DeflateM () -> ZlibDecoder
 runDeflateM' st m =
   case unDeflateM m st of
-    (_,   Running   _)    -> Done
-    (_,   Dead      e)    -> DecompError e
-    (st', NeedsData f)    -> NeedMore (\ bstr -> runDeflateM' st' (f bstr))
-    (st', HaveChunk c m') -> Chunk c (runDeflateM' st' m')
+    Running   _   _    -> Done
+    Dead      _   e    -> DecompError e
+    NeedsData st' f    -> NeedMore (\ bstr -> runDeflateM' st' (f bstr))
+    HaveChunk st' c m' -> Chunk c (runDeflateM' st' m')
 
 -- -----------------------------------------------------------------------------
 
 getNextChunk :: DeflateM ()
-getNextChunk = DeflateM $ \ st -> (st, NeedsData loadChunk)
+getNextChunk = DeflateM $ \ st -> NeedsData st loadChunk
  where
   loadChunk bstr =
     case S.uncons bstr of
@@ -155,10 +153,11 @@ getNextChunk = DeflateM $ \ st -> (st, NeedsData loadChunk)
         do dcs <- get
            set dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
 
+{-# INLINE nextBit #-}
 nextBit :: DeflateM Bool
 nextBit =
   do dcs <- get
-     let nextBitNo = dcsNextBitNo dcs
+     let !nextBitNo = dcsNextBitNo dcs
      if | nextBitNo >  8 -> raise (DecompressionError "Weird bit state")
         | nextBitNo == 8 -> case S.uncons (dcsInput dcs) of
                               Nothing -> getNextChunk >> nextBit
@@ -167,7 +166,7 @@ nextBit =
                                           , dcsCurByte   = nextb
                                           , dcsInput     = rest }
                                    nextBit
-        | otherwise      -> do let v = dcsCurByte dcs `testBit` nextBitNo
+        | otherwise      -> do let !v = dcsCurByte dcs `testBit` nextBitNo
                                set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
                                return v
 
@@ -288,4 +287,4 @@ publishLazy :: L.ByteString -> DeflateM ()
 publishLazy lbstr = go (L.toChunks lbstr)
  where
   go []       = return ()
-  go (c:rest) = DeflateM $ \ st -> (st, HaveChunk c (go rest))
+  go (c:rest) = DeflateM $ \ st -> HaveChunk st c (go rest)
