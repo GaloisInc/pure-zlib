@@ -1,8 +1,10 @@
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiWayIf                 #-}
 module Codec.Compression.Zlib.Monad(
          DeflateM
        , runDeflateM
+       , ZlibDecoder(..)
        , raise
        , DecompressionError(..)
          -- * Getting data from the input stream.
@@ -10,18 +12,19 @@ module Codec.Compression.Zlib.Monad(
        , nextBits
        , nextByte
        , nextWord16
+       , nextWord32
        , nextBlock
        , nextCode
-       , readRest
          -- * Aligning
        , advanceToByte
-         -- * Emitting data
+         -- * Emitting data into the output window
        , emitByte
        , emitBlock
        , emitPastChunk
-         -- * Getting output
+         -- * Getting and publishing output
        , finalAdler
-       , finalOutput
+       , moveWindow
+       , finalize
        )
  where
 
@@ -31,8 +34,8 @@ import Codec.Compression.Zlib.OutputWindow
 import Control.Exception(Exception)
 import Control.Monad
 import Data.Bits
-import Data.ByteString.Lazy(ByteString)
-import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString      as S
+import qualified Data.ByteString.Lazy as L
 import Data.Int
 import Data.Typeable
 import Data.Word
@@ -43,9 +46,16 @@ data DecompressionState = DecompressionState {
        dcsNextBitNo     :: !Int
      , dcsCurByte       :: !Word8
      , dcsAdler32       :: !AdlerState
-     , dcsInput         :: !ByteString
+     , dcsInput         :: !S.ByteString
      , dcsOutput        :: !OutputWindow
      }
+
+instance Show DecompressionState where
+  show dcs = "DecompressionState<nextBit=" ++ show (dcsNextBitNo dcs) ++ "," ++
+             "curByte=" ++ show (dcsCurByte dcs) ++ ",inputLen=" ++
+             show (S.length (dcsInput dcs)) ++ ">"
+
+-- -----------------------------------------------------------------------------
 
 data DecompressionError = HuffmanTreeError   String
                         | FormatError        String
@@ -65,68 +75,101 @@ instance Show DecompressionError where
 
 instance Exception DecompressionError
 
-type DeflateState = Either DecompressionError DecompressionState
+-- -----------------------------------------------------------------------------
 
-newtype DeflateM a = DeflateM { unDeflateM :: DeflateState -> (a,DeflateState) }
+data DeflateState a = Running   !a
+                    | Dead      !DecompressionError
+                    | NeedsData !(S.ByteString -> DeflateM a)
+                    | HaveChunk !S.ByteString !(DeflateM a)
+
+newtype DeflateM a = DeflateM {
+    unDeflateM :: DecompressionState -> (DecompressionState, DeflateState a)
+  }
 
 instance Applicative DeflateM where
-  pure x = DeflateM (\ s -> (x, s))
-  (<*>)  = ap
+  pure  = return
+  (<*>) = ap
 
 instance Functor DeflateM where
-  fmap f m = DeflateM (\ s -> case unDeflateM m s of
-                                (_, Left err) -> (error "ignore fmap", Left err)
-                                (x, Right s') -> (f x, Right s'))
+  fmap f m = do x <- m
+                return (f x)
 
 instance Monad DeflateM where
-  return x = DeflateM (\ s -> (x, s))
-  m >>= f  = DeflateM (\ s -> case unDeflateM m s of
-                                (_, Left err) -> (error "ignore bind", Left err)
-                                (x, st') -> unDeflateM (f x) st')
+  return x = DeflateM $ \ st -> (st, Running x)
+  m >>= f  = DeflateM $ \ st ->
+               case unDeflateM m st of
+                 (st', Running   x)        ->
+                   unDeflateM (f x) st'
+                 (st', Dead      e)        ->
+                   (st', Dead e)
+                 (st', NeedsData fill)     ->
+                   (st', NeedsData (\ b -> fill b >>= f))
+                 (st', HaveChunk c resume) ->
+                   (st', HaveChunk c (resume >>= f))
 
 get :: DeflateM DecompressionState
-get = DeflateM (\ s -> case s of
-                         Left _ -> (error "used error get()", s)
-                         Right st -> (st, s))
+get = DeflateM (\ s -> (s, Running s))
 
 set :: DecompressionState -> DeflateM ()
-set st = DeflateM (\ s -> case s of
-                            Left _ -> ((), s)
-                            Right _  -> ((), Right st))
+set st = DeflateM (\ _ -> (st, Running ()))
 
 raise :: DecompressionError -> DeflateM a
-raise e = DeflateM (\ _ -> (error "used error raise()", Left e))
+raise e = DeflateM (\ st -> (st, Dead e))
 
-initialState :: ByteString -> DecompressionState
-initialState bstr =
-  case BS.uncons bstr of
-    Nothing       -> error "No compressed data to inflate."
-    Just (f,rest) -> DecompressionState 0 f initialAdlerState rest emptyWindow
-
-runDeflateM :: DeflateM a -> ByteString -> Either DecompressionError a
-runDeflateM m i =
-  case unDeflateM m (Right (initialState i)) of
-    (x, Right _) -> Right x
-    (_, Left  e) -> Left e
+initialState :: DecompressionState
+initialState = DecompressionState {
+    dcsNextBitNo = 8
+  , dcsCurByte   = 0
+  , dcsAdler32   = initialAdlerState
+  , dcsInput     = S.empty
+  , dcsOutput    = emptyWindow
+  }
 
 -- -----------------------------------------------------------------------------
+
+data ZlibDecoder = NeedMore (S.ByteString -> ZlibDecoder)
+                 | Chunk S.ByteString ZlibDecoder
+                 | Done
+                 | DecompError DecompressionError
+
+runDeflateM :: DeflateM () -> ZlibDecoder
+runDeflateM m = runDeflateM' initialState m
+
+runDeflateM' :: DecompressionState -> DeflateM () -> ZlibDecoder
+runDeflateM' st m =
+  case unDeflateM m st of
+    (_,   Running   _)    -> Done
+    (_,   Dead      e)    -> DecompError e
+    (st', NeedsData f)    -> NeedMore (\ bstr -> runDeflateM' st' (f bstr))
+    (st', HaveChunk c m') -> Chunk c (runDeflateM' st' m')
+
+-- -----------------------------------------------------------------------------
+
+getNextChunk :: DeflateM ()
+getNextChunk = DeflateM $ \ st -> (st, NeedsData loadChunk)
+ where
+  loadChunk bstr =
+    case S.uncons bstr of
+      Nothing -> getNextChunk
+      Just (nextb, rest) ->
+        do dcs <- get
+           set dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
 
 nextBit :: DeflateM Bool
 nextBit =
   do dcs <- get
-     let v = dcsCurByte dcs `testBit` dcsNextBitNo dcs
-     set $ advanceBit dcs
-     return v
- where
-  advanceBit dcs
-    | dcsNextBitNo dcs == 7 =
-        case BS.uncons (dcsInput dcs) of
-          Nothing ->
-            error "Bit required, but no bits available!"
-          Just (nextb, rest) ->
-            dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
-    | otherwise             =
-        dcs{ dcsNextBitNo = dcsNextBitNo dcs + 1 }
+     let nextBitNo = dcsNextBitNo dcs
+     if | nextBitNo >  8 -> raise (DecompressionError "Weird bit state")
+        | nextBitNo == 8 -> case S.uncons (dcsInput dcs) of
+                              Nothing -> getNextChunk >> nextBit
+                              Just (nextb, rest) ->
+                                do set dcs{ dcsNextBitNo = 0
+                                          , dcsCurByte   = nextb
+                                          , dcsInput     = rest }
+                                   nextBit
+        | otherwise      -> do let v = dcsCurByte dcs `testBit` nextBitNo
+                               set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
+                               return v
 
 nextBits :: (Num a, Bits a) => Int -> DeflateM a
 nextBits x
@@ -142,14 +185,16 @@ nextBits x
 nextByte :: DeflateM Word8
 nextByte =
   do dcs <- get
-     case BS.uncons (dcsInput dcs) of
-       _ | dcsNextBitNo dcs /= 0 ->
-            nextBits 8
-       Nothing ->
-         error "nextByte called with no more data."
-       Just (nextb, rest) ->
-          do set dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
-             return (dcsCurByte dcs)
+     if | dcsNextBitNo dcs == 0 -> do set dcs{ dcsNextBitNo = 8 }
+                                      return (dcsCurByte dcs)
+        | dcsNextBitNo dcs /= 8 -> nextBits 8 -- we're not aligned. sigh.
+        | otherwise             -> case S.uncons (dcsInput dcs) of
+                                     Nothing -> getNextChunk >> nextByte
+                                     Just (nextb, rest) ->
+                                       do set dcs{ dcsNextBitNo = 8,
+                                                   dcsCurByte   = nextb,
+                                                   dcsInput     = rest }
+                                          return nextb
 
 nextWord16 :: DeflateM Word16
 nextWord16 =
@@ -157,19 +202,39 @@ nextWord16 =
      high <- fromIntegral `fmap` nextByte
      return ((high `shiftL` 8) .|. low)
 
-nextBlock :: Integral a => a -> DeflateM ByteString
+nextWord32 :: DeflateM Word32
+nextWord32 =
+  do a <- fromIntegral `fmap` nextByte
+     b <- fromIntegral `fmap` nextByte
+     c <- fromIntegral `fmap` nextByte
+     d <- fromIntegral `fmap` nextByte
+     return ((a `shiftL` 24) .|. (b `shiftL` 16) .|. (c `shiftL` 8) .|. d)
+
+nextBlock :: Integral a => a -> DeflateM L.ByteString
 nextBlock amt =
   do dcs <- get
-     unless (dcsNextBitNo dcs == 0) $
-       fail "Can't get a block on a non-byte boundary."
-     let curBlock = BS.cons (dcsCurByte dcs) (dcsInput dcs)
-         (block, rest) = BS.splitAt (fromIntegral amt) curBlock
-     case BS.uncons rest of
-       Nothing ->
-         fail "Not enough data left after nextBlock."
-       Just (first, rest') ->
-         do set dcs{ dcsNextBitNo = 0, dcsCurByte = first, dcsInput = rest' }
-            return block
+     if | dcsNextBitNo dcs == 0 ->
+            do let startByte = dcsCurByte dcs
+               set dcs{ dcsNextBitNo = 8 }
+               rest <- nextBlock (amt - 1)
+               return (L.cons startByte rest)
+        | dcsNextBitNo dcs == 8 ->
+            getBlock (fromIntegral amt) (dcsInput dcs)
+        | otherwise             ->
+            fail "Can't get a block on a non-byte boundary."
+ where
+  getBlock len bstr
+    | len < S.length bstr = do let (mine, rest) = S.splitAt len bstr
+                               dcs <- get
+                               set dcs{ dcsNextBitNo = 8, dcsInput = rest }
+                               return (L.fromStrict mine)
+    | S.null bstr         = do getNextChunk
+                               dcs <- get
+                               let byte1 = dcsCurByte dcs
+                               rest <- getBlock (len - 1) (dcsInput dcs)
+                               return (L.cons byte1 rest)
+    | otherwise           = do rest <- getBlock (len - S.length bstr) S.empty
+                               return (L.fromStrict bstr `L.append` rest)
 
 nextCode :: Show a => HuffmanTree a -> DeflateM a
 nextCode tree =
@@ -179,19 +244,10 @@ nextCode tree =
        NewTree tree'    -> nextCode tree'
        Result x         -> return x
 
-readRest :: DeflateM ByteString
-readRest =
-  do dcs <- get
-     return (BS.cons (dcsCurByte dcs) (dcsInput dcs))
-
 advanceToByte :: DeflateM ()
 advanceToByte =
   do dcs <- get
-     when (dcsNextBitNo dcs /= 0) $
-       case BS.uncons (dcsInput dcs) of
-         Nothing -> error "Advanced with no bytes left!"
-         Just (nextb, rest) ->
-           set dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
+     set dcs{ dcsNextBitNo = 8 }
 
 emitByte :: Word8 -> DeflateM ()
 emitByte b =
@@ -199,22 +255,37 @@ emitByte b =
      set dcs{ dcsOutput  = dcsOutput dcs `addByte` b
             , dcsAdler32 = advanceAdler (dcsAdler32 dcs) b }
 
-emitBlock :: ByteString -> DeflateM ()
+emitBlock :: L.ByteString -> DeflateM ()
 emitBlock b =
   do dcs <- get
      set dcs { dcsOutput  = dcsOutput dcs `addChunk` b
-             , dcsAdler32 = BS.foldl advanceAdler (dcsAdler32 dcs) b }
+             , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) b }
 
 emitPastChunk :: Int -> Int64 -> DeflateM ()
 emitPastChunk dist len =
   do dcs <- get
-     let (output', newChunk) = addOldChunk (dcsOutput dcs) dist len
+     let (output', builtChunks, newChunk) = addOldChunk (dcsOutput dcs) dist len
      set dcs { dcsOutput = output'
-             , dcsAdler32 = BS.foldl advanceAdler (dcsAdler32 dcs) newChunk }
+             , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) newChunk }
+     publishLazy builtChunks
 
 finalAdler :: DeflateM Word32
 finalAdler = (finalizeAdler . dcsAdler32) `fmap` get
 
-finalOutput :: DeflateM ByteString
-finalOutput = (outByteString . dcsOutput) `fmap` get
+moveWindow :: DeflateM ()
+moveWindow =
+  do dcs <- get
+     let (builtChunks, output') = adjustWindow (dcsOutput dcs)
+     set dcs{ dcsOutput = output' }
+     publishLazy builtChunks
 
+finalize :: DeflateM ()
+finalize =
+  do dcs <- get
+     publishLazy (finalizeWindow (dcsOutput dcs))
+
+publishLazy :: L.ByteString -> DeflateM ()
+publishLazy lbstr = go (L.toChunks lbstr)
+ where
+  go []       = return ()
+  go (c:rest) = DeflateM $ \ st -> (st, HaveChunk c (go rest))

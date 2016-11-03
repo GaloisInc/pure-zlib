@@ -9,32 +9,28 @@ import Codec.Compression.Zlib.HuffmanTree
 import Codec.Compression.Zlib.Monad
 import Control.Monad
 import Data.Bits
-import Data.ByteString.Lazy(ByteString)
-import qualified Data.ByteString.Lazy as BS
 import Data.Int
 import Data.List
 import Data.Map.Strict(Map)
 import qualified Data.Map.Strict as Map
 import Data.Word
+import Numeric
 
-inflate :: DeflateM ByteString
+inflate :: DeflateM ()
 inflate =
   do isFinal <- inflateBlock
+     moveWindow
      if isFinal
-        then checkChecksum >> finalOutput
+        then checkChecksum >> finalize
         else inflate
  where
-  shiftAdd x y = (x `shiftL` 8) .|. fromIntegral y
-  --
   checkChecksum =
     do advanceToByte
-       rest     <- readRest
-       ourAdler <- finalAdler
-       let theirAdler = BS.foldl shiftAdd 0 rest
-       if | BS.length rest < 4     -> raise (ChecksumError "checksum missing")
-          | BS.length rest > 4     -> raise (FormatError "Ends in middle of file")
-          | theirAdler /= ourAdler -> raise (ChecksumError "checksum mismatch")
-          | otherwise              -> return ()
+       ourAdler   <- finalAdler
+       theirAdler <- nextWord32
+       unless (theirAdler == ourAdler) $
+         raise (ChecksumError ("checksum mismatch: " ++ showHex theirAdler "" ++
+                               " != " ++ showHex ourAdler ""))
 
 
 inflateBlock :: DeflateM Bool

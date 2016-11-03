@@ -1,42 +1,54 @@
 {-# LANGUAGE MultiWayIf #-}
 module Codec.Compression.Zlib(
          DecompressionError(..)
+       , ZlibDecoder(NeedMore, Chunk, Done, DecompError)
        , decompress
+       , decompressIncremental
        )
  where
 
-import Codec.Compression.Zlib.Deflate
-import Codec.Compression.Zlib.Monad
-import Data.Bits
-import Data.ByteString.Lazy(ByteString)
-import qualified Data.ByteString.Lazy as BS
-import Data.Word
+import Codec.Compression.Zlib.Deflate(inflate)
+import Codec.Compression.Zlib.Monad(ZlibDecoder, DecompressionError(..),
+                                    ZlibDecoder(NeedMore,Chunk,Done,DecompError),
+                                    DeflateM, runDeflateM, raise, nextByte)
+import Control.Monad(unless, when, replicateM_)
+import Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
+import qualified Data.ByteString.Lazy as L
+import Data.Word(Word16)
 
-decompress :: ByteString -> Either DecompressionError ByteString
-decompress ifile =
-  case BS.uncons ifile of
-    Nothing -> Left (HeaderError "Could not read CMF.")
-    Just (cmf, rest) ->
-     case BS.uncons rest of
-       Nothing -> Left (HeaderError "Could not read FLG.")
-       Just (flg, body) ->
-         runDecompression cmf flg body
+decompressIncremental :: ZlibDecoder
+decompressIncremental = runDeflateM inflateWithHeaders
 
-runDecompression :: Word8 -> Word8 -> ByteString ->
-                    Either DecompressionError ByteString
-runDecompression cmf flg body
-   | both `mod` 31 /= 0 = Left (HeaderError ("Header checksum failed"))
-   | cm        /= 8     = Left (HeaderError ("Bad method ("++show cm++")"))
-   | cinfo     >  7     = Left (HeaderError "Window size too big.")
-   | otherwise          = runDeflateM inflate body'
+decompress :: L.ByteString -> Either DecompressionError L.ByteString
+decompress ifile = run decompressIncremental (L.toChunks ifile) []
  where
-  cm     = cmf .&. 0x0f
-  cinfo  = cmf `shiftR` 4
-  fdict  = testBit flg 5
---  flevel = flg `shiftR` 6
-  --
-  body' | fdict     = BS.drop 4 body
-        | otherwise = body
-  --
-  both  :: Word16
-  both   = (fromIntegral cmf `shiftL` 8) .|. fromIntegral flg
+  run (NeedMore _) [] _ =
+    Left (DecompressionError "Ran out of data mid-decompression 2.")
+  run (NeedMore f) (first:rest) acc =
+    run (f first) rest acc
+  run (Chunk c m) ls acc =
+    run m ls (c:acc)
+  run Done        [] acc =
+    Right (L.fromChunks (reverse acc))
+  run Done        (_:_) _ =
+    Left (DecompressionError "Finished with data remaining.")
+  run (DecompError e) _ _ =
+    Left e
+
+inflateWithHeaders :: DeflateM ()
+inflateWithHeaders =
+  do cmf <- nextByte
+     flg <- nextByte
+     let both   = fromIntegral cmf `shiftL` 8 .|. fromIntegral flg
+         cm     = cmf .&. 0x0f
+         cinfo  = cmf `shiftR` 4
+         fdict  = testBit flg 5
+--       flevel = flg `shiftR` 6
+     unless ((both :: Word16) `mod` 31 == 0) $
+       raise (HeaderError "Header checksum failed")
+     unless (cm == 8) $
+       raise (HeaderError ("Bad compression method: " ++ show cm))
+     unless (cinfo <= 7) $
+       raise (HeaderError ("Window size too big: " ++ show cinfo))
+     when fdict $ replicateM_ 4 nextByte -- just skip them for now (FIXME)
+     inflate
