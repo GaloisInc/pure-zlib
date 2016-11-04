@@ -13,23 +13,25 @@ import Codec.Compression.Zlib.Monad(ZlibDecoder, DecompressionError(..),
                                     DeflateM, runDeflateM, raise, nextByte)
 import Control.Monad(unless, when, replicateM_)
 import Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
+import Data.ByteString.Builder(byteString,toLazyByteString)
 import qualified Data.ByteString.Lazy as L
+import Data.Monoid((<>))
 import Data.Word(Word16)
 
 decompressIncremental :: ZlibDecoder
 decompressIncremental = runDeflateM inflateWithHeaders
 
 decompress :: L.ByteString -> Either DecompressionError L.ByteString
-decompress ifile = run decompressIncremental (L.toChunks ifile) []
+decompress ifile = run decompressIncremental (L.toChunks ifile) mempty
  where
   run (NeedMore _) [] _ =
     Left (DecompressionError "Ran out of data mid-decompression 2.")
   run (NeedMore f) (first:rest) acc =
     run (f first) rest acc
   run (Chunk c m) ls acc =
-    run m ls (c:acc)
+    run m ls (acc <> byteString c)
   run Done        [] acc =
-    Right (L.fromChunks (reverse acc))
+    Right (toLazyByteString acc)
   run Done        (_:_) _ =
     Left (DecompressionError "Finished with data remaining.")
   run (DecompError e) _ _ =
