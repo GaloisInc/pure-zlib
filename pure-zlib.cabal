@@ -15,7 +15,7 @@ description:         A Haskell-only implementation of the zlib / DEFLATE
 
 library
   default-language:   Haskell2010
-  ghc-options:        -Wall
+  ghc-options:        -Wall -O2
   hs-source-dirs:     src
   build-depends:
                       base               >= 4.6   && < 5.0,
@@ -41,7 +41,7 @@ library
 executable deflate
   default-language:   Haskell2010
   main-is:            Deflate.hs
-  ghc-options:        -Wall
+  ghc-options:        -Wall -O2
   build-depends:
                       base        >= 4.6   && < 5.0,
                       base-compat >= 0.9.1 && < 0.11,
