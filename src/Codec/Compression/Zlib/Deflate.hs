@@ -11,8 +11,8 @@ import Control.Monad
 import Data.Bits
 import Data.Int
 import Data.List
-import Data.Map.Strict(Map)
-import qualified Data.Map.Strict as Map
+import Data.IntMap.Strict(IntMap)
+import qualified Data.IntMap.Strict as Map
 import Data.Word
 import Numeric
 
@@ -88,8 +88,8 @@ inflateBlock =
 
 getCodeLengths :: HuffmanTree Int ->
                   Int -> Int -> Int ->
-                  Map Int Int ->
-                  DeflateM (Map Int Int)
+                  IntMap Int ->
+                  DeflateM (IntMap Int)
 getCodeLengths tree n maxl prev acc
   | n >= maxl   = return acc
   | otherwise =
@@ -119,7 +119,7 @@ getLength c =
     Nothing -> raise (DecompressionError ("getLength for bad code: "++show c))
     Just m  -> m
 
-getLengthMap :: Map Int (DeflateM Int64)
+getLengthMap :: IntMap (DeflateM Int64)
 getLengthMap = Map.fromList [
     (257, return 3)
   , (258, return 4)
@@ -158,7 +158,7 @@ getDistance c =
     Nothing -> raise (DecompressionError ("getDistance for bad code: "++show c))
     Just m  -> m
 
-getDistanceMap :: Map Int (DeflateM Int)
+getDistanceMap :: IntMap (DeflateM Int)
 getDistanceMap = Map.fromList [
     (0,  return 1)
   , (1,  return 2)
@@ -212,7 +212,7 @@ computeHuffmanTree initialData =
     Left  err -> raise (HuffmanTreeError err)
     Right x   -> return x
 
-computeCodeValues :: Ord a => [(a, Int)] -> [(a, Int, Int)]
+computeCodeValues :: [(Int, Int)] -> [(Int, Int, Int)]
 computeCodeValues vals = Map.foldrWithKey (\ v (l, c) a -> (v,l,c):a) [] codes
  where
   valsNo0s = filter (\ (_, b) -> (b /= 0)) vals

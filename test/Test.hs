@@ -1,6 +1,7 @@
 import Codec.Compression.Zlib
 import Codec.Compression.Zlib.Deflate
 import Data.ByteString.Lazy(readFile)
+import Data.Char (ord)
 import Data.List(last, isPrefixOf)
 import Prelude hiding (readFile)
 import System.FilePath
@@ -9,28 +10,28 @@ import Test.Tasty.HUnit
 
 -- -----------------------------------------------------------------------------
 
-rfcSimpleTestLengths :: [(Char, Int)]
+rfcSimpleTestLengths :: [(Int, Int)]
 rfcSimpleTestLengths = [
-    ('A', 3)
-  , ('B', 3)
-  , ('C', 3)
-  , ('D', 3)
-  , ('E', 3)
-  , ('F', 2)
-  , ('G', 4)
-  , ('H', 4)
+    (ord 'A', 3)
+  , (ord 'B', 3)
+  , (ord 'C', 3)
+  , (ord 'D', 3)
+  , (ord 'E', 3)
+  , (ord 'F', 2)
+  , (ord 'G', 4)
+  , (ord 'H', 4)
   ]
 
-rfcSimpleTestResults :: [(Char, Int, Int)]
+rfcSimpleTestResults :: [(Int, Int, Int)]
 rfcSimpleTestResults = [
-    ('A', 3, 2)  --  010
-  , ('B', 3, 3)  --  011
-  , ('C', 3, 4)  --  100
-  , ('D', 3, 5)  --  101
-  , ('E', 3, 6)  --  110
-  , ('F', 2, 0)  --   00
-  , ('G', 4, 14) -- 1110
-  , ('H', 4, 15) -- 1111
+    (ord 'A', 3, 2)  --  010
+  , (ord 'B', 3, 3)  --  011
+  , (ord 'C', 3, 4)  --  100
+  , (ord 'D', 3, 5)  --  101
+  , (ord 'E', 3, 6)  --  110
+  , (ord 'F', 2, 0)  --   00
+  , (ord 'G', 4, 14) -- 1110
+  , (ord 'H', 4, 15) -- 1111
   ]
 
 fixedHuffmanLengths :: [(Int, Int)]
