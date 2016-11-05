@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiWayIf                 #-}
+{-# LANGUAGE Rank2Types                 #-}
 module Codec.Compression.Zlib.Monad(
          DeflateM
        , runDeflateM
@@ -77,42 +78,51 @@ instance Exception DecompressionError
 
 -- -----------------------------------------------------------------------------
 
-data DeflateState a = Running   !DecompressionState !a
-                    | Dead      !DecompressionState !DecompressionError
-                    | NeedsData !DecompressionState !(S.ByteString -> DeflateM a)
-                    | HaveChunk !DecompressionState !S.ByteString !(DeflateM a)
-
 newtype DeflateM a = DeflateM {
-    unDeflateM :: DecompressionState -> DeflateState a
+    unDeflateM :: DecompressionState -> (DecompressionState -> a -> ZlibDecoder) -> ZlibDecoder
   }
 
 instance Applicative DeflateM where
-  pure  = return
-  (<*>) = ap
+  pure  x = DeflateM (\ s k -> k s x)
+
+  f <*> x = DeflateM $ \ s1 k ->
+     unDeflateM f s1 $ \ s2 g ->
+     unDeflateM x s2 $ \ s3 y -> k s3 (g y)
+
+  m *> n = DeflateM $ \ s1 k ->
+    unDeflateM m s1 $ \ s2 _ -> unDeflateM n s2 k
+
+  {-# INLINE pure #-}
+  {-# INLINE (<*>) #-}
+  {-# INLINE (*>) #-}
+
 
 instance Functor DeflateM where
-  fmap f m = do x <- m
-                return (f x)
+  fmap f m = DeflateM (\s k -> unDeflateM m s (\s' a -> k s' (f a)))
+  {-# INLINE fmap #-}
 
 instance Monad DeflateM where
   {-# INLINE return #-}
-  return x = DeflateM $ \ st -> Running st x
+  return = pure
+
   {-# INLINE (>>=) #-}
-  m >>= f  = DeflateM $ \ st ->
-               case unDeflateM m st of
-                 Running   st' x        -> unDeflateM (f x) st'
-                 Dead      st' e        -> Dead st' e
-                 NeedsData st' fill     -> NeedsData st' (\ b -> fill b >>= f)
-                 HaveChunk st' c resume -> HaveChunk st' c (resume >>= f)
+  m >>= f = DeflateM $ \ s1 k ->
+     unDeflateM m s1 $ \ s2 a -> unDeflateM (f a) s2 k
+
+  (>>) = (*>)
+  {-# INLINE (>>) #-}
 
 get :: DeflateM DecompressionState
-get = DeflateM (\ s -> Running s s)
+get = DeflateM (\ s k -> k s s)
+{-# INLINE get #-}
 
 set :: DecompressionState -> DeflateM ()
-set st = DeflateM (\ _ -> Running st ())
+set s = DeflateM (\ _ k -> k s ())
+{-# INLINE set #-}
 
 raise :: DecompressionError -> DeflateM a
-raise e = DeflateM (\ st -> Dead st e)
+raise e = DeflateM (\ _ _ -> DecompError e)
+{-# INLINE raise #-}
 
 initialState :: DecompressionState
 initialState = DecompressionState {
@@ -131,29 +141,20 @@ data ZlibDecoder = NeedMore (S.ByteString -> ZlibDecoder)
                  | DecompError DecompressionError
 
 runDeflateM :: DeflateM () -> ZlibDecoder
-runDeflateM m = runDeflateM' initialState m
-
-runDeflateM' :: DecompressionState -> DeflateM () -> ZlibDecoder
-runDeflateM' st m =
-  case unDeflateM m st of
-    Running   _   _    -> Done
-    Dead      _   e    -> DecompError e
-    NeedsData st' f    -> NeedMore (\ bstr -> runDeflateM' st' (f bstr))
-    HaveChunk st' c m' -> Chunk c (runDeflateM' st' m')
+runDeflateM m = unDeflateM m initialState (\ _ _ -> Done)
+{-# INLINE runDeflateM #-}
 
 -- -----------------------------------------------------------------------------
 
 getNextChunk :: DeflateM ()
-getNextChunk = DeflateM $ \ st -> NeedsData st loadChunk
+getNextChunk = DeflateM $ \ st k -> NeedMore (loadChunk st k)
  where
-  loadChunk bstr =
+  loadChunk st k bstr =
     case S.uncons bstr of
-      Nothing -> getNextChunk
+      Nothing -> NeedMore (loadChunk st k)
       Just (nextb, rest) ->
-        do dcs <- get
-           set dcs{ dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest }
+         k st { dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest } ()
 
-{-# INLINE nextBit #-}
 nextBit :: DeflateM Bool
 nextBit =
   do dcs <- get
@@ -283,8 +284,9 @@ finalize =
   do dcs <- get
      publishLazy (finalizeWindow (dcsOutput dcs))
 
+{-# INLINE publishLazy #-}
 publishLazy :: L.ByteString -> DeflateM ()
-publishLazy lbstr = go (L.toChunks lbstr)
+publishLazy lbstr = DeflateM (\ st k -> go st k (L.toChunks lbstr))
  where
-  go []       = return ()
-  go (c:rest) = DeflateM $ \ st -> HaveChunk st c (go rest)
+  go st k []       = k st ()
+  go st k (c:rest) = Chunk c (go st k rest)
