@@ -69,3 +69,4 @@ advanceTree x node =
         HuffmanEmpty   -> AdvanceError "Advanced to empty tree!"
         HuffmanValue y -> Result y
         t              -> NewTree t
+{-# INLINE advanceTree #-}

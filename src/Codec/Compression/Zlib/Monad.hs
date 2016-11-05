@@ -117,7 +117,7 @@ get = DeflateM (\ s k -> k s s)
 {-# INLINE get #-}
 
 set :: DecompressionState -> DeflateM ()
-set s = DeflateM (\ _ k -> k s ())
+set !s = DeflateM (\ _ k -> k s ())
 {-# INLINE set #-}
 
 raise :: DecompressionError -> DeflateM a
@@ -159,25 +159,28 @@ nextBit :: DeflateM Bool
 nextBit =
   do dcs <- get
      let !nextBitNo = dcsNextBitNo dcs
-     if | nextBitNo >  8 -> raise (DecompressionError "Weird bit state")
-        | nextBitNo == 8 -> case S.uncons (dcsInput dcs) of
-                              Nothing -> getNextChunk >> nextBit
-                              Just (nextb, rest) ->
-                                do set dcs{ dcsNextBitNo = 0
-                                          , dcsCurByte   = nextb
-                                          , dcsInput     = rest }
-                                   nextBit
-        | otherwise      -> do let !v = dcsCurByte dcs `testBit` nextBitNo
-                               set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
-                               return v
+     case compare nextBitNo 8 of
+       GT -> raise (DecompressionError "Weird bit state")
+       EQ -> case S.uncons (dcsInput dcs) of
+               Nothing -> getNextChunk >> nextBit
+               Just (nextb, rest) ->
+                 do set dcs{ dcsNextBitNo = 0
+                           , dcsCurByte   = nextb
+                           , dcsInput     = rest }
+                    nextBit
+
+       LT -> do let !v = dcsCurByte dcs `testBit` nextBitNo
+                set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
+                return v
 
 nextBits :: (Num a, Bits a) => Int -> DeflateM a
-nextBits x
- | x < 1     = error "nextBits called with x < 1"
- | x == 1    = toNum `fmap` nextBit
- | otherwise = do cur  <- toNum `fmap` nextBit
-                  rest <- nextBits (x - 1)
-                  return ((rest `shiftL` 1) .|. cur)
+nextBits x =
+  case compare x 1 of
+    LT -> error "nextBits called with x < 1"
+    EQ -> toNum `fmap` nextBit
+    GT -> do cur  <- toNum `fmap` nextBit
+             rest <- nextBits (x - 1)
+             return $! ((rest `shiftL` 1) .|. cur)
  where
   toNum False = 0
   toNum True  = 1
@@ -243,6 +246,7 @@ nextCode tree =
        AdvanceError str -> raise (HuffmanTreeError str)
        NewTree tree'    -> nextCode tree'
        Result x         -> return x
+{-# INLINE nextCode #-}
 
 advanceToByte :: DeflateM ()
 advanceToByte =
@@ -254,6 +258,7 @@ emitByte b =
   do dcs <- get
      set dcs{ dcsOutput  = dcsOutput dcs `addByte` b
             , dcsAdler32 = advanceAdler (dcsAdler32 dcs) b }
+{-# INLINE emitByte #-}
 
 emitBlock :: L.ByteString -> DeflateM ()
 emitBlock b =
@@ -268,6 +273,7 @@ emitPastChunk dist len =
      set dcs { dcsOutput = output'
              , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) newChunk }
      publishLazy builtChunks
+{-# INLINE emitPastChunk #-}
 
 finalAdler :: DeflateM Word32
 finalAdler = (finalizeAdler . dcsAdler32) `fmap` get
