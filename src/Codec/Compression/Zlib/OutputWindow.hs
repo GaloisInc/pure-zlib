@@ -12,17 +12,6 @@ module Codec.Compression.Zlib.OutputWindow(
        )
  where
 
-{-
-Old timings:
-------------
-./.cabal-sandbox/bin/deflate all.z  5.88s user 0.14s system 98% cpu 6.088 total
-./.cabal-sandbox/bin/deflate all.z  6.22s user 0.14s system 99% cpu 6.389 total
-./.cabal-sandbox/bin/deflate all.z  5.96s user 0.13s system 99% cpu 6.124 total
-./.cabal-sandbox/bin/deflate all.z  6.03s user 0.13s system 99% cpu 6.190 total
-./.cabal-sandbox/bin/deflate all.z  6.00s user 0.13s system 99% cpu 6.160 total
-./.cabal-sandbox/bin/deflate all.z  6.33s user 0.15s system 99% cpu 6.510 total
--}
-
 import Data.ByteString.Builder
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
