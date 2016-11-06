@@ -173,15 +173,16 @@ nextBit =
                 set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
                 return v
 
-nextBits :: (Num a, Bits a) => Int -> DeflateM a
-nextBits x =
-  case compare x 1 of
-    LT -> error "nextBits called with x < 1"
-    EQ -> toNum `fmap` nextBit
-    GT -> do cur  <- toNum `fmap` nextBit
-             rest <- nextBits (x - 1)
-             return $! ((rest `shiftL` 1) .|. cur)
+nextBits :: (Show a, Num a, Bits a) => Int -> DeflateM a
+nextBits x | x < 1     = error "nextBits called with x < 1"
+           | otherwise = go 0 0
  where
+  go :: (Show a, Num a, Bits a) => Int -> a -> DeflateM a
+  go shiftNum acc
+    | shiftNum == x = return acc
+    | otherwise     = do cur <- toNum `fmap` nextBit
+                         go (shiftNum + 1) (acc .|. (cur `shiftL` shiftNum))
+  --
   toNum False = 0
   toNum True  = 1
 
