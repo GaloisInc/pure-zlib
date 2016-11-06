@@ -270,10 +270,9 @@ emitBlock b =
 emitPastChunk :: Int -> Int64 -> DeflateM ()
 emitPastChunk dist len =
   do dcs <- get
-     let (output', builtChunks, newChunk) = addOldChunk (dcsOutput dcs) dist len
+     let (output', newChunk) = addOldChunk (dcsOutput dcs) dist len
      set dcs { dcsOutput = output'
              , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) newChunk }
-     publishLazy builtChunks
 {-# INLINE emitPastChunk #-}
 
 finalAdler :: DeflateM Word32
@@ -282,9 +281,12 @@ finalAdler = (finalizeAdler . dcsAdler32) `fmap` get
 moveWindow :: DeflateM ()
 moveWindow =
   do dcs <- get
-     let (builtChunks, output') = adjustWindow (dcsOutput dcs)
-     set dcs{ dcsOutput = output' }
-     publishLazy builtChunks
+     case emitExcess (dcsOutput dcs) of
+       Nothing ->
+         return ()
+       Just (builtChunks, output') ->
+         do set dcs{ dcsOutput = output' }
+            publishLazy builtChunks
 
 finalize :: DeflateM ()
 finalize =

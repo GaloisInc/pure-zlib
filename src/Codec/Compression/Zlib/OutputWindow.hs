@@ -4,7 +4,7 @@
 module Codec.Compression.Zlib.OutputWindow(
          OutputWindow
        , emptyWindow
-       , adjustWindow
+       , emitExcess
        , finalizeWindow
        , addByte
        , addChunk
@@ -24,55 +24,44 @@ Old timings:
 -}
 
 import Data.ByteString.Builder
+import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
+import Data.FingerTree
 import Data.Int
 import Data.Monoid
 import Data.Word
 
+type WindowType = FingerTree Int S.ByteString
+
+instance Monoid Int where
+  mempty  = 0
+  mappend = (+)
+
+instance Measured Int S.ByteString where
+  measure = S.length
+
 data OutputWindow = OutputWindow {
-       owWindow    :: !L.ByteString
+       owWindow    :: !WindowType
      , owRecent    :: !Builder
      }
 
 emptyWindow :: OutputWindow
-emptyWindow = OutputWindow L.empty mempty
+emptyWindow = OutputWindow empty mempty
 
-adjustWindow :: OutputWindow -> (L.ByteString, OutputWindow)
-adjustWindow ow
-  -- One of the following cases must be true:
-  -- Case #1: Between our old window and the new stuff we're adding, we still
-  --          don't have enough to completely fill a window.
-  | totalLen < 32768   = let ow' = OutputWindow (owWindow ow <> recent) mempty
-                         in (L.empty, ow')
-  -- Case #2: We've just added quite a lot of stuff; in fact, so much stuff,
-  --          that the new window is entirely contained in that amount. So we
-  --          should commit the old window and then *also* commit any excess
-  --          data we have at the start of the new stuff.
-  | recentLen >= 32768 = let ow' = OutputWindow recentWindow mempty
-                         in (owWindow ow <> excessRecent, ow')
-  -- Case #3: After adding the new stuff to our old window we're going to have
-  --          too much data. Because we failed the test for #2, we know that the
-  --          split point is back in our previous window. Beacuse we failed the
-  --          test for #1, though, we know that there is excess data there. So
-  --          we'll split off that bit and commit it, and then combine the
-  --          remainders.
-  | otherwise          = let ow' = OutputWindow (windowRemains <> recent) mempty
-                         in (excessWindow, ow')
+emitExcess :: OutputWindow -> Maybe (L.ByteString, OutputWindow)
+emitExcess ow
+  | totalMeasure < 65536 = Nothing
+  | otherwise            = Just (excess, ow{ owWindow = window' })
  where
-  recent       = toLazyByteString (owRecent ow)
-  curWindowLen = L.length (owWindow ow)
-  recentLen    = L.length recent
-  totalLen     = curWindowLen + recentLen
-  -- these values are used if there's enough stuff in 'recent' that we can
-  -- just toss our old window away
-  (excessRecent, recentWindow) = L.splitAt (recentLen - 32768) recent
-  -- these values are used if there's excess, but it's totally within the
-  -- confines of the current window
-  (excessWindow, windowRemains) = L.splitAt (totalLen - 32768) (owWindow ow)
+  window              = owWindow ow
+  totalMeasure        = measure window
+  excessAmount        = totalMeasure - 32768
+  (excessFT, window') = split (>= excessAmount) window
+  excess              = toLazyByteString (foldMap byteString excessFT)
 
 finalizeWindow :: OutputWindow -> L.ByteString
 finalizeWindow ow =
-  toLazyByteString (lazyByteString (owWindow ow) <> (owRecent ow))
+  toLazyByteString (foldMap byteString (owWindow ow) <> owRecent ow)
 
 -- -----------------------------------------------------------------------------
 
@@ -82,22 +71,19 @@ addByte !ow !b = ow{ owRecent = owRecent ow <> word8 b }
 addChunk :: OutputWindow -> L.ByteString -> OutputWindow
 addChunk !ow !bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
 
-addOldChunk :: OutputWindow ->
-               Int -> Int64 ->
-               (OutputWindow, L.ByteString, L.ByteString)
-addOldChunk !ow !dist !len =
-  (ow' { owRecent = lazyByteString res }, output, res)
+addOldChunk :: OutputWindow -> Int -> Int64 -> (OutputWindow, L.ByteString)
+addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
  where
-  -- Generate the history by forcing a commit
-  (output, ow') = adjustWindow ow
-  window        = owWindow ow'
-  windowLen     = L.length window
-  offset        = windowLen - fromIntegral dist
-  --
-  base          = L.drop offset window
-  baseLen       = L.length base
-  res           = get len
-  --
-  get x | x == 0      = L.empty
-        | x < baseLen = L.take x base
-        | otherwise   = base <> get (x - baseLen)
+  output      = L.foldlChunks (|>) (owWindow ow) (toLazyByteString (owRecent ow))
+  dropAmt     = measure output - dist
+  (prev, sme) = split (> dropAmt) output
+  s :< rest   = viewl sme
+  start       = S.take (fromIntegral len) (S.drop (dropAmt-measure prev) s)
+  len'        = fromIntegral len - S.length start
+  (m, rest')  = split (> len') rest
+  middle      = L.toStrict (toLazyByteString (foldMap byteString m))
+  end         = case viewl rest' of
+                  EmptyL -> S.empty
+                  bs2 :< _ -> S.take (len' - measure m) bs2
+  chunkInf    = L.fromChunks [start, middle, end] `L.append` chunk
+  chunk       = L.take len chunkInf
