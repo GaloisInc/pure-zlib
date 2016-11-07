@@ -17,6 +17,8 @@ import           Data.ByteString.Builder(byteString,toLazyByteString)
 import qualified Data.ByteString.Lazy as L
 import           Data.Monoid((<>))
 import           Data.Word(Word16)
+import           Prelude()
+import           Prelude.Compat
 
 decompressIncremental :: ZlibDecoder
 decompressIncremental = runDeflateM inflateWithHeaders
