@@ -20,8 +20,10 @@ import           Data.FingerTree(FingerTree, Measured, ViewL(..),
                                  empty, (|>), split, measure, viewl)
 import           Data.Foldable.Compat(foldMap)
 import           Data.Int(Int64)
-import           Data.Monoid(mempty, (<>))
+import           Data.Monoid.Compat((<>))
 import           Data.Word(Word8)
+import           Prelude()
+import           Prelude.Compat
 
 type WindowType = FingerTree Int S.ByteString
 
