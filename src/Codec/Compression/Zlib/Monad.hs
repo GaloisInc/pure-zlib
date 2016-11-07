@@ -29,19 +29,24 @@ module Codec.Compression.Zlib.Monad(
        )
  where
 
-import Codec.Compression.Zlib.Adler32
-import Codec.Compression.Zlib.HuffmanTree
-import Codec.Compression.Zlib.OutputWindow
-import Control.Exception(Exception)
-import Control.Monad
-import Data.Bits
+import           Codec.Compression.Zlib.Adler32(AdlerState, initialAdlerState,
+                                                advanceAdler, finalizeAdler)
+import           Codec.Compression.Zlib.HuffmanTree(HuffmanTree, advanceTree,
+                                                    AdvanceResult(..))
+import           Codec.Compression.Zlib.OutputWindow(OutputWindow, emptyWindow,
+                                                     emitExcess, addByte,
+                                                     addChunk, addOldChunk,
+                                                     finalizeWindow)
+import           Control.Exception(Exception)
+import           Control.Monad(Monad)
+import           Data.Bits(Bits(..))
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
-import Data.Int
-import Data.Typeable
-import Data.Word
-import Prelude()
-import Prelude.Compat
+import           Data.Int(Int64)
+import           Data.Typeable(Typeable)
+import           Data.Word(Word32, Word16, Word8)
+import           Prelude()
+import           Prelude.Compat
 
 data DecompressionState = DecompressionState {
        dcsNextBitNo     :: !Int

@@ -6,7 +6,7 @@ module Codec.Compression.Zlib.HuffmanTree(
        )
  where
 
-import Data.Bits
+import Data.Bits(testBit)
 
 data HuffmanTree a = HuffmanNode (HuffmanTree a) (HuffmanTree a)
                    | HuffmanValue a

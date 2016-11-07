@@ -12,13 +12,16 @@ module Codec.Compression.Zlib.OutputWindow(
        )
  where
 
-import Data.ByteString.Builder
+import           Data.ByteString.Builder(Builder, toLazyByteString, word8,
+                                         lazyByteString, byteString)
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
-import Data.FingerTree
-import Data.Int
-import Data.Monoid
-import Data.Word
+import           Data.FingerTree(FingerTree, Measured, ViewL(..),
+                                 empty, (|>), split, measure, viewl)
+import           Data.Foldable.Compat(foldMap)
+import           Data.Int(Int64)
+import           Data.Monoid(mempty, (<>))
+import           Data.Word(Word8)
 
 type WindowType = FingerTree Int S.ByteString
 

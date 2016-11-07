@@ -6,8 +6,8 @@ module Codec.Compression.Zlib.Adler32(
        )
  where
 
-import Data.Bits
-import Data.Word
+import Data.Bits(shiftL, (.|.))
+import Data.Word(Word8, Word16, Word32)
 
 data AdlerState = AdlerState { adlerA :: !Word16, adlerB :: !Word16 }
 

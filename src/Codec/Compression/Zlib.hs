@@ -7,16 +7,16 @@ module Codec.Compression.Zlib(
        )
  where
 
-import Codec.Compression.Zlib.Deflate(inflate)
-import Codec.Compression.Zlib.Monad(ZlibDecoder, DecompressionError(..),
-                                    ZlibDecoder(NeedMore,Chunk,Done,DecompError),
-                                    DeflateM, runDeflateM, raise, nextByte)
-import Control.Monad(unless, when, replicateM_)
-import Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
-import Data.ByteString.Builder(byteString,toLazyByteString)
+import           Codec.Compression.Zlib.Deflate(inflate)
+import           Codec.Compression.Zlib.Monad(ZlibDecoder(..), DeflateM,
+                                              DecompressionError(..),
+                                              runDeflateM, raise, nextByte)
+import           Control.Monad(unless, when, replicateM_)
+import           Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
+import           Data.ByteString.Builder(byteString,toLazyByteString)
 import qualified Data.ByteString.Lazy as L
-import Data.Monoid((<>))
-import Data.Word(Word16)
+import           Data.Monoid((<>))
+import           Data.Word(Word16)
 
 decompressIncremental :: ZlibDecoder
 decompressIncremental = runDeflateM inflateWithHeaders

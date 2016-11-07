@@ -5,16 +5,22 @@ module Codec.Compression.Zlib.Deflate(
        )
  where
 
-import Codec.Compression.Zlib.HuffmanTree
-import Codec.Compression.Zlib.Monad
-import Control.Monad
-import Data.Bits
-import Data.Int
-import Data.List
-import Data.IntMap.Strict(IntMap)
+import           Codec.Compression.Zlib.HuffmanTree(HuffmanTree,
+                                                    createHuffmanTree)
+import           Codec.Compression.Zlib.Monad(DeflateM, DecompressionError(..),
+                                              raise,nextBit,nextBits,nextCode,
+                                              nextBlock,nextWord16,nextWord32,
+                                              emitByte,emitBlock,emitPastChunk,
+                                              advanceToByte, moveWindow,
+                                              finalAdler, finalize)
+import           Control.Monad(unless, replicateM)
+import           Data.Bits(shiftL, complement)
+import           Data.Int(Int64)
+import           Data.List(sortBy)
+import           Data.IntMap.Strict(IntMap)
 import qualified Data.IntMap.Strict as Map
-import Data.Word
-import Numeric
+import           Data.Word(Word8)
+import           Numeric(showHex)
 
 inflate :: DeflateM ()
 inflate =
