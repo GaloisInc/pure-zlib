@@ -18,6 +18,7 @@ library
   ghc-options:        -Wall
   hs-source-dirs:     src
   build-depends:
+                      array              >= 0.5.1 && < 0.9,
                       base               >= 4.6   && < 5.0,
                       base-compat        >= 0.9.1 && < 0.11,
                       bytestring         >= 0.10  && < 0.11,

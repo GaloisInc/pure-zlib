@@ -14,6 +14,7 @@ import           Codec.Compression.Zlib.Monad(DeflateM, DecompressionError(..),
                                               advanceToByte, moveWindow,
                                               finalAdler, finalize)
 import           Control.Monad(unless, replicateM)
+import           Data.Array(Array, array, (!))
 import           Data.Bits(shiftL, complement)
 import           Data.Int(Int64)
 import           Data.List(sortBy)
@@ -119,13 +120,11 @@ getCodeLengths tree n maxl prev acc
 -- -----------------------------------------------------------------------------
 
 getLength :: Int -> DeflateM Int64
-getLength c =
-  case Map.lookup c getLengthMap of
-    Nothing -> raise (DecompressionError ("getLength for bad code: "++show c))
-    Just m  -> m
+getLength c = lengthArray ! c
+{-# INLINE getLength #-}
 
-getLengthMap :: IntMap (DeflateM Int64)
-getLengthMap = Map.fromList [
+lengthArray :: Array Int (DeflateM Int64)
+lengthArray = array (257,285) [
     (257, return 3)
   , (258, return 4)
   , (259, return 5)
@@ -158,13 +157,11 @@ getLengthMap = Map.fromList [
   ]
 
 getDistance :: Int -> DeflateM Int
-getDistance c =
-  case Map.lookup c getDistanceMap of
-    Nothing -> raise (DecompressionError ("getDistance for bad code: "++show c))
-    Just m  -> m
+getDistance c = distanceArray ! c
+{-# INLINE getDistance #-}
 
-getDistanceMap :: IntMap (DeflateM Int)
-getDistanceMap = Map.fromList [
+distanceArray :: Array Int (DeflateM Int)
+distanceArray = array (0,29) [
     (0,  return 1)
   , (1,  return 2)
   , (2,  return 3)
