@@ -81,14 +81,15 @@ inflateBlock =
   runInflate :: HuffmanTree Int -> HuffmanTree Int -> DeflateM ()
   runInflate litTree distTree =
     do code <- nextCode litTree
-       if | code <  256 -> do emitByte (fromIntegral code)
-                              runInflate litTree distTree
-          | code == 256 -> return ()
-          | code > 256  -> do len      <- getLength code
-                              distCode <- nextCode distTree
-                              dist     <- getDistance distCode
-                              emitPastChunk dist len
-                              runInflate litTree distTree
+       case compare code 256 of
+          LT -> do emitByte (fromIntegral code)
+                   runInflate litTree distTree
+          EQ -> return ()
+          GT -> do len      <- getLength code
+                   distCode <- nextCode distTree
+                   dist     <- getDistance distCode
+                   emitPastChunk dist len
+                   runInflate litTree distTree
 
 -- -----------------------------------------------------------------------------
 
