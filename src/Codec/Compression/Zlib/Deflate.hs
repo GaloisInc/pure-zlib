@@ -25,12 +25,17 @@ import           Numeric(showHex)
 
 inflate :: DeflateM ()
 inflate =
-  do isFinal <- inflateBlock
-     moveWindow
-     if isFinal
-        then checkChecksum >> finalize
-        else inflate
+  do fixedLit  <- buildFixedLitTree
+     fixedDist <- buildFixedDistanceTree
+     go fixedLit fixedDist
  where
+  go fixedLit fixedDist =
+    do isFinal <- inflateBlock fixedLit fixedDist
+       moveWindow
+       if isFinal
+          then checkChecksum >> finalize
+          else go fixedLit fixedDist
+  --
   checkChecksum =
     do advanceToByte
        ourAdler   <- finalAdler
@@ -39,8 +44,8 @@ inflate =
          raise (ChecksumError ("checksum mismatch: " ++ showHex theirAdler "" ++
                                " != " ++ showHex ourAdler ""))
 
-inflateBlock :: DeflateM Bool
-inflateBlock =
+inflateBlock :: HuffmanTree Int -> HuffmanTree Int -> DeflateM Bool
+inflateBlock fixedLitTree fixedDistanceTree =
   do bfinal <- (== (1::Word8)) `fmap` nextBits 1
      btype  <- nextBits 2
      case btype :: Word8 of
@@ -53,9 +58,7 @@ inflateBlock =
             emitBlock =<< nextBlock len
             return bfinal
        1 -> -- compressed with fixed Huffman codes
-         do flt <- fixedLitTree
-            fdt <- fixedDistanceTree
-            runInflate flt fdt
+         do runInflate fixedLitTree fixedDistanceTree
             return bfinal
        2 -> -- compressed with dynamic Huffman codes
          do hlit  <- (257+) `fmap` nextBits 5
@@ -197,15 +200,15 @@ distanceArray = array (0,29) [
 
 -- -----------------------------------------------------------------------------
 
-fixedLitTree :: DeflateM (HuffmanTree Int)
-fixedLitTree = computeHuffmanTree
+buildFixedLitTree :: DeflateM (HuffmanTree Int)
+buildFixedLitTree = computeHuffmanTree
   ([(x, 8) | x <- [0   .. 143]] ++
    [(x, 9) | x <- [144 .. 255]] ++
    [(x, 7) | x <- [256 .. 279]] ++
    [(x, 8) | x <- [280 .. 287]])
 
-fixedDistanceTree :: DeflateM (HuffmanTree Int)
-fixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
+buildFixedDistanceTree :: DeflateM (HuffmanTree Int)
+buildFixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
 
 -- -----------------------------------------------------------------------------
 
