@@ -7,6 +7,7 @@ module Codec.Compression.Zlib.HuffmanTree(
  where
 
 import Data.Bits(testBit)
+import Data.Word(Word8)
 
 data HuffmanTree a = HuffmanNode (HuffmanTree a) (HuffmanTree a)
                    | HuffmanValue a
@@ -59,13 +60,13 @@ addHuffmanNode val len code node =
         Left err -> Left err
         Right l' -> Right (HuffmanNode l' r)
 
-advanceTree :: Bool -> HuffmanTree a -> AdvanceResult a
+advanceTree :: Word8 -> HuffmanTree a -> AdvanceResult a
 advanceTree x node =
   case node of
     HuffmanEmpty     -> AdvanceError "Tried to advance empty tree!"
     HuffmanValue _   -> AdvanceError "Tried to advance value!"
     HuffmanNode  l r ->
-      case if x then r else l of
+      case if (x == 1) then r else l of
         HuffmanEmpty   -> AdvanceError "Advanced to empty tree!"
         HuffmanValue y -> Result y
         t              -> NewTree t

@@ -8,7 +8,7 @@ module Codec.Compression.Zlib.Deflate(
 import           Codec.Compression.Zlib.HuffmanTree(HuffmanTree,
                                                     createHuffmanTree)
 import           Codec.Compression.Zlib.Monad(DeflateM, DecompressionError(..),
-                                              raise,nextBit,nextBits,nextCode,
+                                              raise,nextBits,nextCode,
                                               nextBlock,nextWord16,nextWord32,
                                               emitByte,emitBlock,emitPastChunk,
                                               advanceToByte, moveWindow,
@@ -38,10 +38,9 @@ inflate =
          raise (ChecksumError ("checksum mismatch: " ++ showHex theirAdler "" ++
                                " != " ++ showHex ourAdler ""))
 
-
 inflateBlock :: DeflateM Bool
 inflateBlock =
-  do bfinal <- nextBit
+  do bfinal <- (== (1::Word8)) `fmap` nextBits 1
      btype  <- nextBits 2
      case btype :: Word8 of
        0 -> -- no compression
