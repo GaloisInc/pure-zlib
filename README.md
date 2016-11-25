@@ -1,4 +1,5 @@
-= A Pure ZLib =
+A Pure ZLib
+-----------
 
 This library is intended as a pure replacement for `zlib`, for systems in which
 you either desire the benefits of a high-level implementation or for systems in
@@ -6,7 +7,8 @@ which `zlib` is not supported. Presently, the cost for these is decreased
 performance; our buffering and output systems are not nearly as tuned as `zlib`s
 has been, resulting in roughly 100x worse performance.
 
-== Getting to Know the Code ==
+Getting to Know the Code
+========================
 
 Most users will want to use the functions in `Codec.Compression.Zlib`, which
 provides both all-in-one as well as an incremental decompression functions. The
@@ -16,25 +18,29 @@ memory is limited.
 Those that would like to hack on the implementation might look at the following
 files:
 
-  * `Codec.Compression.Zlib.Adler32`: Defines the Adler32 checksum function used
-    in zlib `.Z` files.
-  * `Codec.Compression.Zlib.Deflate`: Defines the core DEFLATE algorithm, as
-    specified in [RFC 1951](https://www.ietf.org/rfc/rfc1951.txt).
-  * `Codec.Compression.Zlib.HuffmanTree`: A simple implementation of a
-    HuffmanTree.
-  * `Codec.Compression.Zlib.Monad`: A handy decompression monad used to run the
-    thing. Based on a combined state and continuation monad.
-  * `Codec.Compression.Zlib.OutputWindow`: The output window data structure,
-    which is a combination of a
-    [fingertree](https://hackage.haskell.org/package/fingertree) and a
-    [ByteString builder](https://hackage.haskell.org/package/bytestring-0.10.8.1/docs/Data-ByteString-Builder.html).
+  * [Codec.Compression.Zlib.Adler32](src/Codec/Compression/Zlib/Adler32.hs):
+    Defines the Adler32 checksum function used in zlib `.Z` files.
+  * [Codec.Compression.Zlib.Deflate](src/Codec/Compression/Zlib/Deflate.hs):
+    Defines the core DEFLATE algorithm, as specified in [RFC
+    1951](https://www.ietf.org/rfc/rfc1951.txt).
+  * [Codec.Compression.Zlib.HuffmanTree](src/Codec/Compression/Zlib/HuffmanTree.hs):
+    A simple implementation of a HuffmanTree.
+  * [Codec.Compression.Zlib.Monad](src/Codec/Compression/Zlib/Monad.hs): A handy
+    decompression monad used to run the thing. Based on a combined state and
+    continuation monad.
+  * [Codec.Compression.Zlib.OutputWindow](src/Codec/Compression/Zlib/OutputWindow.hs):
+    The output window data structure, which is a combination of a
+    [fingertree](https://hackage.haskell.org/package/fingertree) and a [ByteString
+    builder](https://hackage.haskell.org/package/bytestring-0.10.8.1/docs/Data-ByteString-Builder.html).
 
-== Compression ==
+Compression
+========================
 
 Compression is not yet implemented by the library, but is [one of our early
 TODOs](#5).
 
-== GZip Support ==
+GZip Support
+========================
 
 The core DEFLATE implementation used in this library should be the same one used
 in GZIP files. However, we currently only work with classic `*.Z` files, which
@@ -43,7 +49,8 @@ likely make it vastly more useful.
 
 This is [another early TODO](#4).
 
-== Performance ==
+Performance
+========================
 
 Performance is notably worse that `zlib`, but probably still acceptable for many
 uses. If you want to help improve the performance of `pure-zlib`, we are
