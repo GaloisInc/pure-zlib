@@ -9,7 +9,6 @@ module Codec.Compression.Zlib.Monad(
        , raise
        , DecompressionError(..)
          -- * Getting data from the input stream.
-       , nextBit
        , nextBits
        , nextByte
        , nextWord16
@@ -84,7 +83,9 @@ instance Exception DecompressionError
 -- -----------------------------------------------------------------------------
 
 newtype DeflateM a = DeflateM {
-    unDeflateM :: DecompressionState -> (DecompressionState -> a -> ZlibDecoder) -> ZlibDecoder
+    unDeflateM :: DecompressionState ->
+                  (DecompressionState -> a -> ZlibDecoder) ->
+                  ZlibDecoder
   }
 
 instance Applicative DeflateM where
@@ -141,7 +142,7 @@ initialState = DecompressionState {
 -- -----------------------------------------------------------------------------
 
 data ZlibDecoder = NeedMore (S.ByteString -> ZlibDecoder)
-                 | Chunk S.ByteString ZlibDecoder
+                 | Chunk L.ByteString ZlibDecoder
                  | Done
                  | DecompError DecompressionError
 
@@ -160,36 +161,38 @@ getNextChunk = DeflateM $ \ st k -> NeedMore (loadChunk st k)
       Just (nextb, rest) ->
          k st { dcsNextBitNo = 0, dcsCurByte = nextb, dcsInput = rest } ()
 
-nextBit :: DeflateM Bool
-nextBit =
-  do dcs <- get
-     let !nextBitNo = dcsNextBitNo dcs
-     case compare nextBitNo 8 of
-       GT -> raise (DecompressionError "Weird bit state")
-       EQ -> case S.uncons (dcsInput dcs) of
-               Nothing -> getNextChunk >> nextBit
-               Just (nextb, rest) ->
-                 do set dcs{ dcsNextBitNo = 0
-                           , dcsCurByte   = nextb
-                           , dcsInput     = rest }
-                    nextBit
+{-# SPECIALIZE nextBits :: Int -> DeflateM Word8 #-}
+{-# SPECIALIZE nextBits :: Int -> DeflateM Int   #-}
+{-# SPECIALIZE nextBits :: Int -> DeflateM Int64 #-}
+{-# INLINE nextBits #-}
+nextBits :: (Num a, Bits a) => Int -> DeflateM a
+nextBits x = nextBits' x 0 0
 
-       LT -> do let !v = dcsCurByte dcs `testBit` nextBitNo
-                set $ dcs{ dcsNextBitNo = nextBitNo + 1 }
-                return v
-
-nextBits :: (Show a, Num a, Bits a) => Int -> DeflateM a
-nextBits x | x < 1     = error "nextBits called with x < 1"
-           | otherwise = go 0 0
- where
-  go :: (Show a, Num a, Bits a) => Int -> a -> DeflateM a
-  go shiftNum acc
-    | shiftNum == x = return acc
-    | otherwise     = do cur <- toNum `fmap` nextBit
-                         go (shiftNum + 1) (acc .|. (cur `shiftL` shiftNum))
-  --
-  toNum False = 0
-  toNum True  = 1
+{-# SPECIALIZE nextBits' :: Int -> Int -> Word8 -> DeflateM Word8 #-}
+{-# SPECIALIZE nextBits' :: Int -> Int -> Int   -> DeflateM Int   #-}
+{-# SPECIALIZE nextBits' :: Int -> Int -> Int64 -> DeflateM Int64 #-}
+{-# INLINE nextBits' #-}
+nextBits' :: (Num a, Bits a) => Int -> Int -> a -> DeflateM a
+nextBits' !x' !shiftNum !acc
+  | x' == 0       = return acc
+  | otherwise     =
+      do dcs <- get
+         case dcsNextBitNo dcs of
+           8 -> case S.uncons (dcsInput dcs) of
+                  Nothing ->
+                    do getNextChunk 
+                       nextBits' x' shiftNum acc
+                  Just (nextb, rest) ->
+                    do set dcs{dcsNextBitNo=0,dcsCurByte=nextb,dcsInput=rest}
+                       nextBits' x' shiftNum acc
+           nextBitNo ->
+             do let !myBits = min x' (8 - nextBitNo)
+                    !base   = dcsCurByte dcs `shiftR` nextBitNo
+                    !mask   = complement (0xFF `shiftL` myBits)
+                    !res    = fromIntegral (base .&. mask)
+                    !acc'   = acc .|. (res `shiftL` shiftNum)
+                set dcs { dcsNextBitNo=nextBitNo + myBits }
+                nextBits' (x' - myBits) (shiftNum + myBits) acc'
 
 nextByte :: DeflateM Word8
 nextByte =
@@ -247,7 +250,7 @@ nextBlock amt =
 
 nextCode :: Show a => HuffmanTree a -> DeflateM a
 nextCode tree =
-  do b <- nextBit
+  do b <- nextBits 1
      case advanceTree b tree of
        AdvanceError str -> raise (HuffmanTreeError str)
        NewTree tree'    -> nextCode tree'
@@ -300,7 +303,4 @@ finalize =
 
 {-# INLINE publishLazy #-}
 publishLazy :: L.ByteString -> DeflateM ()
-publishLazy lbstr = DeflateM (\ st k -> go st k (L.toChunks lbstr))
- where
-  go st k []       = k st ()
-  go st k (c:rest) = Chunk c (go st k rest)
+publishLazy lbstr = DeflateM (\ st k -> Chunk lbstr (k st ()))

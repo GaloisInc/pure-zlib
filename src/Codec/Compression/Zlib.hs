@@ -13,7 +13,7 @@ import           Codec.Compression.Zlib.Monad(ZlibDecoder(..), DeflateM,
                                               runDeflateM, raise, nextByte)
 import           Control.Monad(unless, when, replicateM_)
 import           Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
-import           Data.ByteString.Builder(byteString,toLazyByteString)
+import           Data.ByteString.Builder(lazyByteString,toLazyByteString)
 import qualified Data.ByteString.Lazy as L
 import           Data.Monoid((<>))
 import           Data.Word(Word16)
@@ -31,7 +31,7 @@ decompress ifile = run decompressIncremental (L.toChunks ifile) mempty
   run (NeedMore f) (first:rest) acc =
     run (f first) rest acc
   run (Chunk c m) ls acc =
-    run m ls (acc <> byteString c)
+    run m ls (acc <> lazyByteString c)
   run Done        [] acc =
     Right (toLazyByteString acc)
   run Done        (_:_) _ =

@@ -29,14 +29,17 @@ type WindowType = FingerTree Int S.ByteString
 
 instance Monoid Int where
   mempty  = 0
+  {-# INLINE mempty #-}
   mappend = (+)
+  {-# INLINE mappend #-}
 
 instance Measured Int S.ByteString where
   measure = S.length
+  {-# INLINE measure #-}
 
 data OutputWindow = OutputWindow {
-       owWindow    :: !WindowType
-     , owRecent    :: !Builder
+       owWindow    :: WindowType
+     , owRecent    :: Builder
      }
 
 emptyWindow :: OutputWindow
@@ -60,13 +63,13 @@ finalizeWindow ow =
 -- -----------------------------------------------------------------------------
 
 addByte :: OutputWindow -> Word8 -> OutputWindow
-addByte !ow !b = ow{ owRecent = owRecent ow <> word8 b }
+addByte ow b = ow{ owRecent = owRecent ow <> word8 b }
 
 addChunk :: OutputWindow -> L.ByteString -> OutputWindow
-addChunk !ow !bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
+addChunk ow bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
 
 addOldChunk :: OutputWindow -> Int -> Int64 -> (OutputWindow, L.ByteString)
-addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
+addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
  where
   output      = L.foldlChunks (|>) (owWindow ow) (toLazyByteString (owRecent ow))
   dropAmt     = measure output - dist
@@ -74,10 +77,20 @@ addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
   s :< rest   = viewl sme
   start       = S.take (fromIntegral len) (S.drop (dropAmt-measure prev) s)
   len'        = fromIntegral len - S.length start
-  (m, rest')  = split (> len') rest
-  middle      = L.toStrict (toLazyByteString (foldMap byteString m))
-  end         = case viewl rest' of
-                  EmptyL -> S.empty
-                  bs2 :< _ -> S.take (len' - measure m) bs2
-  chunkInf    = L.fromChunks [start, middle, end] `L.append` chunk
+  chunkBase   = getChunk rest len' (byteString start)
+  chunkInf    = chunkBase `L.append` chunkInf
   chunk       = L.take len chunkInf
+
+getChunk :: WindowType -> Int -> Builder -> L.ByteString
+getChunk win len acc
+  | len <= 0 = toLazyByteString acc
+  | otherwise =
+      case viewl win of
+        EmptyL -> toLazyByteString acc
+        cur :< rest ->
+          let curlen = S.length cur
+          in case compare (S.length cur) len of
+               LT -> getChunk rest (len - curlen) (acc <> byteString cur)
+               EQ -> toLazyByteString (acc <> byteString cur)
+               GT -> let (mine, _notMine) = S.splitAt len cur
+                     in toLazyByteString (acc <> byteString mine)

@@ -8,12 +8,13 @@ module Codec.Compression.Zlib.Deflate(
 import           Codec.Compression.Zlib.HuffmanTree(HuffmanTree,
                                                     createHuffmanTree)
 import           Codec.Compression.Zlib.Monad(DeflateM, DecompressionError(..),
-                                              raise,nextBit,nextBits,nextCode,
+                                              raise,nextBits,nextCode,
                                               nextBlock,nextWord16,nextWord32,
                                               emitByte,emitBlock,emitPastChunk,
                                               advanceToByte, moveWindow,
                                               finalAdler, finalize)
 import           Control.Monad(unless, replicateM)
+import           Data.Array(Array, array, (!))
 import           Data.Bits(shiftL, complement)
 import           Data.Int(Int64)
 import           Data.List(sortBy)
@@ -24,12 +25,17 @@ import           Numeric(showHex)
 
 inflate :: DeflateM ()
 inflate =
-  do isFinal <- inflateBlock
-     moveWindow
-     if isFinal
-        then checkChecksum >> finalize
-        else inflate
+  do fixedLit  <- buildFixedLitTree
+     fixedDist <- buildFixedDistanceTree
+     go fixedLit fixedDist
  where
+  go fixedLit fixedDist =
+    do isFinal <- inflateBlock fixedLit fixedDist
+       moveWindow
+       if isFinal
+          then checkChecksum >> finalize
+          else go fixedLit fixedDist
+  --
   checkChecksum =
     do advanceToByte
        ourAdler   <- finalAdler
@@ -38,10 +44,9 @@ inflate =
          raise (ChecksumError ("checksum mismatch: " ++ showHex theirAdler "" ++
                                " != " ++ showHex ourAdler ""))
 
-
-inflateBlock :: DeflateM Bool
-inflateBlock =
-  do bfinal <- nextBit
+inflateBlock :: HuffmanTree Int -> HuffmanTree Int -> DeflateM Bool
+inflateBlock fixedLitTree fixedDistanceTree =
+  do bfinal <- (== (1::Word8)) `fmap` nextBits 1
      btype  <- nextBits 2
      case btype :: Word8 of
        0 -> -- no compression
@@ -53,9 +58,7 @@ inflateBlock =
             emitBlock =<< nextBlock len
             return bfinal
        1 -> -- compressed with fixed Huffman codes
-         do flt <- fixedLitTree
-            fdt <- fixedDistanceTree
-            runInflate flt fdt
+         do runInflate fixedLitTree fixedDistanceTree
             return bfinal
        2 -> -- compressed with dynamic Huffman codes
          do hlit  <- (257+) `fmap` nextBits 5
@@ -81,14 +84,15 @@ inflateBlock =
   runInflate :: HuffmanTree Int -> HuffmanTree Int -> DeflateM ()
   runInflate litTree distTree =
     do code <- nextCode litTree
-       if | code <  256 -> do emitByte (fromIntegral code)
-                              runInflate litTree distTree
-          | code == 256 -> return ()
-          | code > 256  -> do len      <- getLength code
-                              distCode <- nextCode distTree
-                              dist     <- getDistance distCode
-                              emitPastChunk dist len
-                              runInflate litTree distTree
+       case compare code 256 of
+          LT -> do emitByte (fromIntegral code)
+                   runInflate litTree distTree
+          EQ -> return ()
+          GT -> do len      <- getLength code
+                   distCode <- nextCode distTree
+                   dist     <- getDistance distCode
+                   emitPastChunk dist len
+                   runInflate litTree distTree
 
 -- -----------------------------------------------------------------------------
 
@@ -120,13 +124,11 @@ getCodeLengths tree n maxl prev acc
 -- -----------------------------------------------------------------------------
 
 getLength :: Int -> DeflateM Int64
-getLength c =
-  case Map.lookup c getLengthMap of
-    Nothing -> raise (DecompressionError ("getLength for bad code: "++show c))
-    Just m  -> m
+getLength c = lengthArray ! c
+{-# INLINE getLength #-}
 
-getLengthMap :: IntMap (DeflateM Int64)
-getLengthMap = Map.fromList [
+lengthArray :: Array Int (DeflateM Int64)
+lengthArray = array (257,285) [
     (257, return 3)
   , (258, return 4)
   , (259, return 5)
@@ -159,13 +161,11 @@ getLengthMap = Map.fromList [
   ]
 
 getDistance :: Int -> DeflateM Int
-getDistance c =
-  case Map.lookup c getDistanceMap of
-    Nothing -> raise (DecompressionError ("getDistance for bad code: "++show c))
-    Just m  -> m
+getDistance c = distanceArray ! c
+{-# INLINE getDistance #-}
 
-getDistanceMap :: IntMap (DeflateM Int)
-getDistanceMap = Map.fromList [
+distanceArray :: Array Int (DeflateM Int)
+distanceArray = array (0,29) [
     (0,  return 1)
   , (1,  return 2)
   , (2,  return 3)
@@ -200,15 +200,15 @@ getDistanceMap = Map.fromList [
 
 -- -----------------------------------------------------------------------------
 
-fixedLitTree :: DeflateM (HuffmanTree Int)
-fixedLitTree = computeHuffmanTree
+buildFixedLitTree :: DeflateM (HuffmanTree Int)
+buildFixedLitTree = computeHuffmanTree
   ([(x, 8) | x <- [0   .. 143]] ++
    [(x, 9) | x <- [144 .. 255]] ++
    [(x, 7) | x <- [256 .. 279]] ++
    [(x, 8) | x <- [280 .. 287]])
 
-fixedDistanceTree :: DeflateM (HuffmanTree Int)
-fixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
+buildFixedDistanceTree :: DeflateM (HuffmanTree Int)
+buildFixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
 
 -- -----------------------------------------------------------------------------
 
