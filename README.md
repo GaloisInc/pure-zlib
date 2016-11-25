@@ -1,5 +1,5 @@
 A Pure ZLib
------------
+===========
 
 This library is intended as a pure replacement for `zlib`, for systems in which
 you either desire the benefits of a high-level implementation or for systems in
@@ -8,7 +8,7 @@ performance; our buffering and output systems are not nearly as tuned as `zlib`s
 has been, resulting in roughly 100x worse performance.
 
 Getting to Know the Code
-========================
+------------------------
 
 Most users will want to use the functions in `Codec.Compression.Zlib`, which
 provides both all-in-one as well as an incremental decompression functions. The
@@ -34,13 +34,13 @@ files:
     builder](https://hackage.haskell.org/package/bytestring-0.10.8.1/docs/Data-ByteString-Builder.html).
 
 Compression
-========================
+-----------
 
 Compression is not yet implemented by the library, but is [one of our early
 TODOs](#5).
 
 GZip Support
-========================
+------------
 
 The core DEFLATE implementation used in this library should be the same one used
 in GZIP files. However, we currently only work with classic `*.Z` files, which
@@ -50,7 +50,7 @@ likely make it vastly more useful.
 This is [another early TODO](#4).
 
 Performance
-========================
+-----------
 
 Performance is notably worse that `zlib`, but probably still acceptable for many
 uses. If you want to help improve the performance of `pure-zlib`, we are
