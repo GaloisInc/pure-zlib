@@ -38,8 +38,8 @@ instance Measured Int S.ByteString where
   {-# INLINE measure #-}
 
 data OutputWindow = OutputWindow {
-       owWindow    :: !WindowType
-     , owRecent    :: !Builder
+       owWindow    :: WindowType
+     , owRecent    :: Builder
      }
 
 emptyWindow :: OutputWindow
@@ -63,13 +63,13 @@ finalizeWindow ow =
 -- -----------------------------------------------------------------------------
 
 addByte :: OutputWindow -> Word8 -> OutputWindow
-addByte !ow !b = ow{ owRecent = owRecent ow <> word8 b }
+addByte ow b = ow{ owRecent = owRecent ow <> word8 b }
 
 addChunk :: OutputWindow -> L.ByteString -> OutputWindow
-addChunk !ow !bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
+addChunk ow bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
 
 addOldChunk :: OutputWindow -> Int -> Int64 -> (OutputWindow, L.ByteString)
-addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
+addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
  where
   output      = L.foldlChunks (|>) (owWindow ow) (toLazyByteString (owRecent ow))
   dropAmt     = measure output - dist
