@@ -77,10 +77,20 @@ addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
   s :< rest   = viewl sme
   start       = S.take (fromIntegral len) (S.drop (dropAmt-measure prev) s)
   len'        = fromIntegral len - S.length start
-  (m, rest')  = split (> len') rest
-  middle      = L.toStrict (toLazyByteString (foldMap byteString m))
-  end         = case viewl rest' of
-                  EmptyL -> S.empty
-                  bs2 :< _ -> S.take (len' - measure m) bs2
-  chunkInf    = L.fromChunks [start, middle, end] `L.append` chunk
+  chunkBase   = getChunk rest len' (byteString start)
+  chunkInf    = chunkBase `L.append` chunkInf
   chunk       = L.take len chunkInf
+
+getChunk :: WindowType -> Int -> Builder -> L.ByteString
+getChunk win len acc
+  | len <= 0 = toLazyByteString acc
+  | otherwise =
+      case viewl win of
+        EmptyL -> toLazyByteString acc
+        cur :< rest ->
+          let curlen = S.length cur
+          in case compare (S.length cur) len of
+               LT -> getChunk rest (len - curlen) (acc <> byteString cur)
+               EQ -> toLazyByteString (acc <> byteString cur)
+               GT -> let (mine, _notMine) = S.splitAt len cur
+                     in toLazyByteString (acc <> byteString mine)
