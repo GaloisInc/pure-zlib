@@ -36,5 +36,5 @@ runDecompression hndl ls decoder =
       do putStrLn "ERROR: Ran out of data mid-decompression."
          hClose hndl
     Chunk c m ->
-      do S.hPut hndl c
+      do L.hPut hndl c
          runDecompression hndl ls m

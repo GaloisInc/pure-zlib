@@ -142,7 +142,7 @@ initialState = DecompressionState {
 -- -----------------------------------------------------------------------------
 
 data ZlibDecoder = NeedMore (S.ByteString -> ZlibDecoder)
-                 | Chunk S.ByteString ZlibDecoder
+                 | Chunk L.ByteString ZlibDecoder
                  | Done
                  | DecompError DecompressionError
 
@@ -303,7 +303,4 @@ finalize =
 
 {-# INLINE publishLazy #-}
 publishLazy :: L.ByteString -> DeflateM ()
-publishLazy lbstr = DeflateM (\ st k -> go st k (L.toChunks lbstr))
- where
-  go st k []       = k st ()
-  go st k (c:rest) = Chunk c (go st k rest)
+publishLazy lbstr = DeflateM (\ st k -> Chunk lbstr (k st ()))
