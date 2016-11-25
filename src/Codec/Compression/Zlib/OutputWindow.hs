@@ -29,10 +29,13 @@ type WindowType = FingerTree Int S.ByteString
 
 instance Monoid Int where
   mempty  = 0
+  {-# INLINE mempty #-}
   mappend = (+)
+  {-# INLINE mappend #-}
 
 instance Measured Int S.ByteString where
   measure = S.length
+  {-# INLINE measure #-}
 
 data OutputWindow = OutputWindow {
        owWindow    :: !WindowType
