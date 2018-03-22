@@ -63,10 +63,10 @@ test-suite test-zlib
                       base-compat      >= 0.9.1    && < 0.11,
                       bytestring       >= 0.10     && < 0.11,
                       filepath         >= 1.4.1    && < 1.6,
-                      HUnit            >= 1.2      && < 1.4,
-                      QuickCheck       >= 2.7      && < 2.9,
+                      HUnit            >= 1.2      && < 1.7,
+                      QuickCheck       >= 2.7      && < 2.12,
                       pure-zlib,
-                      tasty            >= 0.11.0.4 && < 0.13,
+                      tasty            >= 0.11.0.4 && < 1.2,
                       tasty-hunit      >= 0.9.2    && < 0.11,
                       tasty-quickcheck >= 0.8.4    && < 0.11
 
