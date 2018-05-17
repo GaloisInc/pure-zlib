@@ -1,5 +1,5 @@
 name:                pure-zlib
-version:             0.6.2
+version:             0.6.3
 synopsis:            A Haskell-only implementation of zlib / DEFLATE
 homepage:            http://github.com/GaloisInc/pure-zlib
 license:             BSD3
