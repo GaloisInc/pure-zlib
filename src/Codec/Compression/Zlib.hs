@@ -15,7 +15,6 @@ import           Control.Monad(unless, when, replicateM_)
 import           Data.Bits((.|.), (.&.), shiftL, shiftR, testBit)
 import           Data.ByteString.Builder(lazyByteString,toLazyByteString)
 import qualified Data.ByteString.Lazy as L
-import           Data.Monoid((<>))
 import           Data.Word(Word16)
 import           Prelude()
 import           Prelude.Compat
