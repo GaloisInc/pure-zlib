@@ -21,7 +21,7 @@ import           Data.FingerTree(FingerTree, Measured, ViewL(..),
 import           Data.Foldable.Compat(foldMap)
 import           Data.Int(Int64)
 import           Data.Monoid.Compat((<>))
-import           Data.Semigroup as Sem
+import qualified Data.Semigroup.Compat as Sem
 import           Data.Word(Word8)
 import           Prelude()
 import           Prelude.Compat
