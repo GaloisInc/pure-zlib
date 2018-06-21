@@ -20,6 +20,7 @@ import           Data.FingerTree(FingerTree, Measured, ViewL(..),
                                  empty, (|>), split, measure, viewl)
 import           Data.Foldable.Compat(foldMap)
 import           Data.Int(Int64)
+import           Data.Monoid.Compat((<>))
 import           Data.Semigroup as Sem
 import           Data.Word(Word8)
 import           Prelude()
