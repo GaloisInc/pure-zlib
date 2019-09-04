@@ -233,7 +233,7 @@ nextBlock amt =
         | dcsNextBitNo dcs == 8 ->
             getBlock (fromIntegral amt) (dcsInput dcs)
         | otherwise             ->
-            fail "Can't get a block on a non-byte boundary."
+            raise (FormatError "Can't get a block on a non-byte boundary.")
  where
   getBlock len bstr
     | len < S.length bstr = do let (mine, rest) = S.splitAt len bstr

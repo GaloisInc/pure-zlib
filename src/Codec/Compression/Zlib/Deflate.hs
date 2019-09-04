@@ -115,6 +115,8 @@ getCodeLengths tree n maxl prev acc
           | code == 18 -> -- repeat a code length of 0 for 11 - 138 times
              do num <- (11+) `fmap` nextBits 7
                 getCodeLengths tree (n+num) maxl 0    (addNTimes n num 0 acc)
+          | otherwise ->
+             raise (DecompressionError ("Unexpected code: " ++ show code))
  where
   addNTimes idx count val old =
     let idxs = take count [idx..]
