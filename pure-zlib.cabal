@@ -1,5 +1,5 @@
 name:                pure-zlib
-version:             0.6.5
+version:             0.6.6
 synopsis:            A Haskell-only implementation of zlib / DEFLATE
 homepage:            http://github.com/GaloisInc/pure-zlib
 license:             BSD3
@@ -8,7 +8,7 @@ author:              Adam Wick
 maintainer:          awick@galois.com
 category:            Codec
 build-type:          Simple
-cabal-version:       >=1.18
+cabal-version:       1.18
 description:         A Haskell-only implementation of the zlib / DEFLATE
                      protocol. Currently only implements the decompression
                      algorithm.
