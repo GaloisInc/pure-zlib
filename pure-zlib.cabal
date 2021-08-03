@@ -81,6 +81,7 @@ benchmark bench-zlib
                       base        >= 4.6   && < 5.0,
                       base-compat >= 0.9.1 && < 0.12,
                       bytestring  >= 0.10  && < 0.11,
+                      criterion   >= 1.5,  
                       pure-zlib,
                       time        >= 1.4.2 && < 1.11
 
