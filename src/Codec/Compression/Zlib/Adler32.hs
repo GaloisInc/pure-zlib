@@ -7,28 +7,24 @@ module Codec.Compression.Zlib.Adler32(
  where
 
 import Data.Bits(shiftL, (.|.))
-import Data.Word(Word8, Word16, Word32)
+import Data.Word(Word8, Word32)
 
-data AdlerState = AdlerState { adlerA :: !Word16, adlerB :: !Word16 }
+data AdlerState = AdlerState { adlerA :: !Word32, adlerB :: !Word32 }
 
 initialAdlerState :: AdlerState
 initialAdlerState = AdlerState 1 0
 
-adlerAdd :: (Integral a, Integral b) => a -> b -> Word16
-adlerAdd x y = fromIntegral ((x32 + y32) `mod` 65521)
- where
-  x32, y32 :: Word32
-  x32 = fromIntegral x
-  y32 = fromIntegral y
+adlerAdd :: Word32 -> Word32 -> Word32
+adlerAdd x y = (x + y) `mod` 65521
+{-# INLINE adlerAdd #-}
 
 advanceAdler :: AdlerState -> Word8 -> AdlerState
 advanceAdler state b = AdlerState a' b'
  where
-  a' = adlerAdd (adlerA state) b
+  a' = adlerAdd (adlerA state) (fromIntegral b)
   b' = adlerAdd (adlerB state) a'
 
 finalizeAdler :: AdlerState -> Word32
-finalizeAdler state = ((fromIntegral (adlerB state)) `shiftL` 16)
-                   .|.  fromIntegral (adlerA state)
+finalizeAdler state = ((adlerB state) `shiftL` 16) .|.  adlerA state
 
 
