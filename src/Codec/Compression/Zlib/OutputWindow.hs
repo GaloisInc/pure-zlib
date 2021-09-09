@@ -16,8 +16,7 @@ import           Data.ByteString.Builder(Builder, toLazyByteString, word8,
                                          lazyByteString, byteString)
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
-import           Data.FingerTree(FingerTree, Measured, ViewL(..),
-                                 empty, (|>), split, measure, viewl)
+import           Codec.Compression.Zlib.FingerTree(FingerTree, Measured, ViewL(..), empty, (|>), split, measure, toBuilder, viewl)
 import           Data.Foldable.Compat(foldMap)
 import           Data.Int(Int64)
 import           Data.Semigroup as Sem
@@ -25,18 +24,9 @@ import           Data.Word(Word8)
 import           Prelude()
 import           Prelude.Compat
 
-type WindowType = FingerTree Int S.ByteString
+type WindowType = FingerTree S.ByteString
 
-instance Sem.Semigroup Int where
-  (<>) = (+)
-
-instance Monoid Int where
-  mempty  = 0
-  {-# INLINE mempty #-}
-  mappend = (+)
-  {-# INLINE mappend #-}
-
-instance Measured Int S.ByteString where
+instance Measured S.ByteString where
   measure = S.length
   {-# INLINE measure #-}
 
@@ -56,12 +46,11 @@ emitExcess ow
   window              = owWindow ow
   totalMeasure        = measure window
   excessAmount        = totalMeasure - 32768
-  (excessFT, window') = split (>= excessAmount) window
-  excess              = toLazyByteString (foldMap byteString excessFT)
+  (excessFT, window') = split excessAmount window
+  excess              = toLazyByteString (toBuilder excessFT)
 
 finalizeWindow :: OutputWindow -> L.ByteString
-finalizeWindow ow =
-  toLazyByteString (foldMap byteString (owWindow ow) <> owRecent ow)
+finalizeWindow ow = toLazyByteString (toBuilder (owWindow ow) <> owRecent ow)
 
 -- -----------------------------------------------------------------------------
 
@@ -76,7 +65,7 @@ addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
  where
   output      = L.foldlChunks (|>) (owWindow ow) (toLazyByteString (owRecent ow))
   dropAmt     = measure output - dist
-  (prev, sme) = split (> dropAmt) output
+  (prev, sme) = split dropAmt output
   s :< rest   = viewl sme
   start       = S.take (fromIntegral len) (S.drop (dropAmt-measure prev) s)
   len'        = fromIntegral len - S.length start
