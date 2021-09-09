@@ -12,12 +12,10 @@ module Codec.Compression.Zlib.OutputWindow(
        )
  where
 
-import           Data.ByteString.Builder(Builder, toLazyByteString, word8,
-                                         lazyByteString, byteString)
+import           Data.ByteString.Builder(Builder, toLazyByteString, word8, lazyByteString)
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
-import           Codec.Compression.Zlib.FingerTree(FingerTree, Measured, ViewL(..), empty, (|>), split, measure, toBuilder, viewl)
-import           Data.Foldable.Compat(foldMap)
+import           Codec.Compression.Zlib.FingerTree(FingerTree, empty, (|>), dropTakeCombine, split, measure, toBuilder)
 import           Data.Int(Int64)
 import           Data.Semigroup as Sem
 import           Data.Word(Word8)
@@ -25,10 +23,6 @@ import           Prelude()
 import           Prelude.Compat
 
 type WindowType = FingerTree S.ByteString
-
-instance Measured S.ByteString where
-  measure = S.length
-  {-# INLINE measure #-}
 
 data OutputWindow = OutputWindow {
        owWindow    :: WindowType
@@ -55,34 +49,17 @@ finalizeWindow ow = toLazyByteString (toBuilder (owWindow ow) <> owRecent ow)
 -- -----------------------------------------------------------------------------
 
 addByte :: OutputWindow -> Word8 -> OutputWindow
-addByte ow b = ow{ owRecent = owRecent ow <> word8 b }
+addByte !ow !b = ow{ owRecent = owRecent ow <> word8 b }
 
 addChunk :: OutputWindow -> L.ByteString -> OutputWindow
-addChunk ow bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
+addChunk !ow !bs = ow{ owRecent = owRecent ow <> lazyByteString bs }
 
 addOldChunk :: OutputWindow -> Int -> Int64 -> (OutputWindow, L.ByteString)
-addOldChunk ow dist len = (OutputWindow output (lazyByteString chunk), chunk)
+addOldChunk !ow !dist !len = (OutputWindow output (lazyByteString chunk), chunk)
  where
   output      = L.foldlChunks (|>) (owWindow ow) (toLazyByteString (owRecent ow))
   dropAmt     = measure output - dist
   (prev, sme) = split dropAmt output
-  s :< rest   = viewl sme
-  start       = S.take (fromIntegral len) (S.drop (dropAmt-measure prev) s)
-  len'        = fromIntegral len - S.length start
-  chunkBase   = getChunk rest len' (byteString start)
+  chunkBase   = dropTakeCombine (dropAmt - measure prev) (fromIntegral len) sme
   chunkInf    = chunkBase `L.append` chunkInf
   chunk       = L.take len chunkInf
-
-getChunk :: WindowType -> Int -> Builder -> L.ByteString
-getChunk win len acc
-  | len <= 0 = toLazyByteString acc
-  | otherwise =
-      case viewl win of
-        EmptyL -> toLazyByteString acc
-        cur :< rest ->
-          let curlen = S.length cur
-          in case compare (S.length cur) len of
-               LT -> getChunk rest (len - curlen) (acc <> byteString cur)
-               EQ -> toLazyByteString (acc <> byteString cur)
-               GT -> let (mine, _notMine) = S.splitAt len cur
-                     in toLazyByteString (acc <> byteString mine)

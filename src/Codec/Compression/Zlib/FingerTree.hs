@@ -41,7 +41,7 @@ module Codec.Compression.Zlib.FingerTree (
     empty,
     (|>),
     -- ** Examining the ends
-    ViewL(..), viewl,
+    dropTakeCombine,
     -- ** Splitting
     -- | These functions are special cases of 'search'.
     split,
@@ -54,6 +54,8 @@ import Prelude hiding (null, reverse)
 import GHC.Generics
 import qualified Data.ByteString as S
 import Data.ByteString.Builder(Builder, byteString)
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Internal as L
 
 type Measure = Int
 
@@ -89,6 +91,10 @@ instance (Measured a) => Semigroup (FingerTree a) where
 instance (Measured a) => Monoid (FingerTree a) where
     mempty = empty
     mappend = (><)
+
+instance Measured S.ByteString where
+  measure = S.length
+  {-# INLINE measure #-}
 
 -- Explicit Digit type (Exercise 1)
 
@@ -207,6 +213,33 @@ viewl Empty                     =  EmptyL
 viewl (Single x)                =  x :< Empty
 viewl (Deep _ (One x) m sf)     =  x :< rotL m sf
 viewl (Deep _ pr m sf)          =  lheadDigit pr :< deep (ltailDigit pr) m sf
+
+dropTakeCombine :: Int -> Int -> FingerTree S.ByteString -> L.ByteString
+dropTakeCombine !amountToSkip !amountToKeep !tree =
+  -- NB: we run this right after calling split, so on we shouldn't ever be in a situation where
+  -- the size of the first chunk is less than `amountToSkip`; if that does happy, split pushed
+  -- us to the wrong place.
+  case tree of
+    Empty -> L.empty 
+    Single x -> go amountToKeep (Single (S.drop amountToSkip x))
+    Deep _ (One x) m sf -> go amountToKeep (Deep 0 (One (S.drop amountToSkip x)) m sf)
+    Deep _ (Two x r) m sf -> go amountToKeep (Deep 0 (Two (S.drop amountToSkip x) r) m sf)
+    Deep _ (Three x r s) m sf -> go amountToKeep (Deep 0 (Three (S.drop amountToSkip x) r s) m sf)
+    Deep _ (Four x r s t) m sf -> go amountToKeep (Deep 0 (Four (S.drop amountToSkip x) r s t) m sf)
+ where
+  go 0 _ = L.empty 
+  go left ftr =
+    case ftr of
+      Empty -> L.empty 
+      Single x -> L.Chunk (S.take left x) L.Empty
+      Deep _ (One x) m sf -> keepSection left x (rotL m sf)
+      Deep _ (Two x r) m sf -> keepSection left x (Deep 0 (One r) m sf)
+      Deep _ (Three x r s) m sf -> keepSection left x (Deep 0 (Two r s) m sf)
+      Deep _ (Four x r s t) m sf -> keepSection left x (Deep 0 (Three r s t) m sf)
+
+  keepSection left chunk rest
+    | S.length chunk >= left = L.Chunk (S.take left chunk) L.Empty 
+    | otherwise = L.Chunk chunk (go (left - S.length chunk) rest)
 
 rotL :: (Measured a) => FingerTree (Node a) -> Digit a -> FingerTree a
 rotL m sf      =   case viewl m of
