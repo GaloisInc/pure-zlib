@@ -91,7 +91,7 @@ inflateBlock fixedLitTree fixedDistanceTree =
           GT -> do len      <- getLength code
                    distCode <- nextCode distTree
                    dist     <- getDistance distCode
-                   emitPastChunk dist len
+                   emitPastChunk dist (fromIntegral len)
                    moveWindow
                    runInflate litTree distTree
 

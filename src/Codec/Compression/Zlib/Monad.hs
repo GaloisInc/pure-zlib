@@ -289,7 +289,7 @@ emitBlock b =
      let adler' = L.foldlChunks advanceAdlerBlock (dcsAdler32 dcs) b
      set dcs { dcsOutput  = output', dcsAdler32 = adler' }
 
-emitPastChunk :: Int -> Int64 -> DeflateM s ()
+emitPastChunk :: Int -> Int -> DeflateM s ()
 emitPastChunk dist len =
   do dcs <- get
      (output', newChunk) <- liftST (addOldChunk (dcsOutput dcs) dist len)
