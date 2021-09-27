@@ -23,7 +23,7 @@ import qualified Data.IntMap.Strict as Map
 import           Data.Word(Word8)
 import           Numeric(showHex)
 
-inflate :: DeflateM ()
+inflate :: DeflateM s ()
 inflate =
   do fixedLit  <- buildFixedLitTree
      fixedDist <- buildFixedDistanceTree
@@ -44,7 +44,7 @@ inflate =
          raise (ChecksumError ("checksum mismatch: " ++ showHex theirAdler "" ++
                                " != " ++ showHex ourAdler ""))
 
-inflateBlock :: HuffmanTree Int -> HuffmanTree Int -> DeflateM Bool
+inflateBlock :: HuffmanTree Int -> HuffmanTree Int -> DeflateM s Bool
 inflateBlock fixedLitTree fixedDistanceTree =
   do bfinal <- (== (1::Word8)) `fmap` nextBits 1
      btype  <- nextBits 2
@@ -81,7 +81,7 @@ inflateBlock fixedLitTree fixedDistanceTree =
        _ -> -- reserved / error
          raise (FormatError ("Unacceptable BTYPE: " ++ show btype))
  where
-  runInflate :: HuffmanTree Int -> HuffmanTree Int -> DeflateM ()
+  runInflate :: HuffmanTree Int -> HuffmanTree Int -> DeflateM s ()
   runInflate litTree distTree =
     do code <- nextCode litTree
        case compare code 256 of
@@ -92,6 +92,7 @@ inflateBlock fixedLitTree fixedDistanceTree =
                    distCode <- nextCode distTree
                    dist     <- getDistance distCode
                    emitPastChunk dist len
+                   moveWindow
                    runInflate litTree distTree
 
 -- -----------------------------------------------------------------------------
@@ -99,7 +100,7 @@ inflateBlock fixedLitTree fixedDistanceTree =
 getCodeLengths :: HuffmanTree Int ->
                   Int -> Int -> Int ->
                   IntMap Int ->
-                  DeflateM (IntMap Int)
+                  DeflateM s (IntMap Int)
 getCodeLengths tree n maxl prev acc
   | n >= maxl   = return acc
   | otherwise =
@@ -125,11 +126,11 @@ getCodeLengths tree n maxl prev acc
 
 -- -----------------------------------------------------------------------------
 
-getLength :: Int -> DeflateM Int64
+getLength :: Int -> DeflateM s Int64
 getLength c = lengthArray ! c
 {-# INLINE getLength #-}
 
-lengthArray :: Array Int (DeflateM Int64)
+lengthArray :: Array Int (DeflateM s Int64)
 lengthArray = array (257,285) [
     (257, return 3)
   , (258, return 4)
@@ -162,11 +163,11 @@ lengthArray = array (257,285) [
   , (285, return 258)
   ]
 
-getDistance :: Int -> DeflateM Int
+getDistance :: Int -> DeflateM s Int
 getDistance c = distanceArray ! c
 {-# INLINE getDistance #-}
 
-distanceArray :: Array Int (DeflateM Int)
+distanceArray :: Array Int (DeflateM s Int)
 distanceArray = array (0,29) [
     (0,  return 1)
   , (1,  return 2)
@@ -202,19 +203,19 @@ distanceArray = array (0,29) [
 
 -- -----------------------------------------------------------------------------
 
-buildFixedLitTree :: DeflateM (HuffmanTree Int)
+buildFixedLitTree :: DeflateM s (HuffmanTree Int)
 buildFixedLitTree = computeHuffmanTree
   ([(x, 8) | x <- [0   .. 143]] ++
    [(x, 9) | x <- [144 .. 255]] ++
    [(x, 7) | x <- [256 .. 279]] ++
    [(x, 8) | x <- [280 .. 287]])
 
-buildFixedDistanceTree :: DeflateM (HuffmanTree Int)
+buildFixedDistanceTree :: DeflateM s (HuffmanTree Int)
 buildFixedDistanceTree = computeHuffmanTree [(x,5) | x <- [0..31]]
 
 -- -----------------------------------------------------------------------------
 
-computeHuffmanTree :: [(Int, Int)] -> DeflateM (HuffmanTree Int)
+computeHuffmanTree :: [(Int, Int)] -> DeflateM s (HuffmanTree Int)
 computeHuffmanTree initialData =
   case createHuffmanTree (computeCodeValues initialData) of
     Left  err -> raise (HuffmanTreeError err)
