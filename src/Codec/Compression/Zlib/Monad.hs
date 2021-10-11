@@ -29,7 +29,8 @@ module Codec.Compression.Zlib.Monad(
  where
 
 import           Codec.Compression.Zlib.Adler32(AdlerState, initialAdlerState,
-                                                advanceAdler, finalizeAdler)
+                                                advanceAdler, advanceAdlerBlock,
+                                                finalizeAdler)
 import           Codec.Compression.Zlib.HuffmanTree(HuffmanTree, advanceTree,
                                                     AdvanceResult(..))
 import           Codec.Compression.Zlib.OutputWindow(OutputWindow, emptyWindow,
@@ -273,14 +274,14 @@ emitBlock :: L.ByteString -> DeflateM ()
 emitBlock b =
   do dcs <- get
      set dcs { dcsOutput  = dcsOutput dcs `addChunk` b
-             , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) b }
+             , dcsAdler32 = advanceAdlerBlock (dcsAdler32 dcs) b }
 
 emitPastChunk :: Int -> Int64 -> DeflateM ()
 emitPastChunk dist len =
   do dcs <- get
      let (output', newChunk) = addOldChunk (dcsOutput dcs) dist len
      set dcs { dcsOutput = output'
-             , dcsAdler32 = L.foldl advanceAdler (dcsAdler32 dcs) newChunk }
+             , dcsAdler32 = advanceAdlerBlock (dcsAdler32 dcs) newChunk }
 {-# INLINE emitPastChunk #-}
 
 finalAdler :: DeflateM Word32

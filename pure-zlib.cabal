@@ -25,8 +25,7 @@ library
                       base-compat        >= 0.9.1 && < 0.12,
                       bytestring         >= 0.10  && < 0.11,
                       bytestring-builder >= 0.10  && < 0.11,
-                      containers         >= 0.5   && < 0.7,
-                      fingertree         >= 0.1   && < 0.3
+                      containers         >= 0.5   && < 0.7
   if !impl(ghc >= 8.0)
     build-depends: semigroups == 0.18.*
   exposed-modules:
@@ -36,6 +35,8 @@ library
                       Codec.Compression.Zlib.HuffmanTree,
                       Codec.Compression.Zlib.Monad,
                       Codec.Compression.Zlib.OutputWindow
+  other-modules:
+                      Codec.Compression.Zlib.FingerTree
   default-extensions:
                       BangPatterns,
                       DeriveDataTypeable,
