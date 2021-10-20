@@ -6,9 +6,7 @@ import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
 import Prelude hiding (readFile, writeFile)
 import Criterion.Main
-import Control.Exception
 import Control.Monad.ST.Lazy
-import Control.Monad (unless)
 
 testCases :: [String]
 testCases = [ "randtest1", "randtest2", "randtest3",
@@ -22,15 +20,15 @@ main = defaultMain
     bgroup "decompression" $
       flip fmap testCases $
         \tc -> env (getFiles tc) $
-          \ ~(zbstr, goldbstr) ->
+          \ ~(zbstr, _) ->
             bgroup tc [
               bgroup "normal" [
-                bench "pure-zlib" $ whnf (decompressPure zbstr) goldbstr
-                , bench "zlib" $ whnf (decompressC zbstr) goldbstr
+                bench "pure-zlib" $ whnf PureZlib.decompress zbstr
+                , bench "zlib" $ whnf CZlib.decompress zbstr
               ]
               , bgroup "incremental" [
-                bench "pure-zlib" $ whnf (decompressIncrementalPure (L.toChunks zbstr)) goldbstr
-                , bench "zlib" $ whnf (decompressIncrementalC (L.toChunks zbstr)) goldbstr
+                bench "pure-zlib" $ whnf decompressIncrementalPure zbstr
+                , bench "zlib" $ whnf decompressIncrementalC zbstr
               ]
             ]
   ]
@@ -40,50 +38,33 @@ main = defaultMain
       goldbstr <- L.readFile $ "test/test-cases/" ++ tc ++ ".gold"
       pure (zbstr, goldbstr)
 
-decompressPure :: L.ByteString -> L.ByteString -> ()
-decompressPure ls real = case PureZlib.decompress ls of
-  Left e -> throw e
-  Right decompressed -> if real == decompressed then () else error "Mismatch in decompression"
-
-decompressIncrementalPure :: [S.ByteString] -> L.ByteString ->  ()
-decompressIncrementalPure = go PureZlib.decompressIncremental
+decompressIncrementalPure :: L.ByteString -> L.ByteString
+decompressIncrementalPure input = go PureZlib.decompressIncremental (L.toChunks input) []
   where
-    go decoder ls real =
+    go decoder ls chunks =
       case decoder of
         PureZlib.Done | not (null ls) -> error "ERROR: Finished decompression with data left."
-        PureZlib.Done | not (L.null real) -> error "ERROR: Did not completely decompress file."
-        PureZlib.Done | otherwise -> ()
+        PureZlib.Done | otherwise -> L.fromChunks $ reverse chunks
         PureZlib.DecompError e -> error ("ERROR: " ++ show e)
-        PureZlib.NeedMore f | (x:rest) <- ls -> go (f x) rest real
-                  | otherwise      -> error "ERROR: Ran out of data mid-decompression."
-        PureZlib.Chunk c m ->
-          let (realfirst, realrest) = L.splitAt (L.length c) real
-          in if realfirst == c
-              then go m ls realrest
-              else error "Mismatch in decompression"
+        PureZlib.NeedMore f
+          | (x:rest) <- ls -> go (f x) rest chunks
+          | otherwise      -> error "ERROR: Ran out of data mid-decompression."
+        PureZlib.Chunk c m -> go m ls (L.toStrict c:chunks)
 
-decompressC :: L.ByteString -> L.ByteString -> ()
-decompressC input real =
-  let decompressed =  CZlib.decompress input
-  in if real == decompressed then () else error "Mismatch in decompression"
-
-decompressIncrementalC :: [S.ByteString] -> L.ByteString -> ()
-decompressIncrementalC ls real = runST $ go (CZlibIncremental.decompressST CZlibIncremental.zlibFormat CZlibIncremental.defaultDecompressParams) ls real
+decompressIncrementalC :: L.ByteString -> L.ByteString
+decompressIncrementalC input = runST $ go (CZlibIncremental.decompressST CZlibIncremental.zlibFormat CZlibIncremental.defaultDecompressParams) (L.toChunks input) []
   where
-    go :: CZlibIncremental.DecompressStream (ST s) -> [S.ByteString] -> L.ByteString -> ST s ()
-    go decoder ls real = case decoder of
+    go :: CZlibIncremental.DecompressStream (ST s) -> [S.ByteString] -> [S.ByteString] -> ST s L.ByteString
+    go decoder ls chunks = case decoder of
       CZlibIncremental.DecompressInputRequired f
         | (x:rest) <- ls -> do
           next <- f x
-          go next rest real
+          go next rest chunks
         | otherwise -> error "ERROR: Ran out of data mid-decompression."
       CZlibIncremental.DecompressOutputAvailable c kont -> do
-          let (realfirst, realrest) = L.splitAt (fromIntegral $ S.length c) real
-          unless (L.toStrict realfirst == c) $ error "Mismatch in decompression"
           next <- kont
-          go next ls realrest
+          go next ls (c:chunks)
       CZlibIncremental.DecompressStreamEnd leftovers
         | not (S.null leftovers) -> error "ERROR: Finished decompression with data left."
-        | not (L.null real) -> error "ERROR: Did not completely decompress file."
-        | otherwise -> pure ()
+        | otherwise -> pure $ L.fromChunks $ reverse chunks
       CZlibIncremental.DecompressStreamError e -> error ("ERROR: " ++ show e)
