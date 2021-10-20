@@ -43,13 +43,13 @@ decompressIncrementalPure input = go PureZlib.decompressIncremental (L.toChunks 
   where
     go decoder ls chunks =
       case decoder of
-        PureZlib.Done | not (null ls) -> error "ERROR: Finished decompression with data left."
-        PureZlib.Done | otherwise -> L.fromChunks $ reverse chunks
-        PureZlib.DecompError e -> error ("ERROR: " ++ show e)
         PureZlib.NeedMore f
           | (x:rest) <- ls -> go (f x) rest chunks
           | otherwise      -> error "ERROR: Ran out of data mid-decompression."
         PureZlib.Chunk c m -> go m ls (L.toStrict c:chunks)
+        PureZlib.Done | not (null ls) -> error "ERROR: Finished decompression with data left."
+        PureZlib.Done | otherwise -> L.fromChunks $ reverse chunks
+        PureZlib.DecompError e -> error ("ERROR: " ++ show e)
 
 decompressIncrementalC :: L.ByteString -> L.ByteString
 decompressIncrementalC input = runST $ go (CZlibIncremental.decompressST CZlibIncremental.zlibFormat CZlibIncremental.defaultDecompressParams) (L.toChunks input) []
