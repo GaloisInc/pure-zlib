@@ -1,6 +1,6 @@
 cabal-version:       2.0
 name:                pure-zlib
-version:             0.6.8
+version:             0.8.0
 synopsis:            A Haskell-only implementation of zlib / DEFLATE
 homepage:            http://github.com/GaloisInc/pure-zlib
 license:             BSD3

@@ -1,19 +1,20 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MagicHash #-}
-module Codec.Compression.Zlib.Adler32(
-         AdlerState
-       , initialAdlerState
-       , advanceAdler
-       , advanceAdlerBlock
-       , finalizeAdler
-       )
- where
 
-import Data.Bits(shiftL, (.|.))
+module Codec.Compression.Zlib.Adler32 (
+  AdlerState,
+  initialAdlerState,
+  advanceAdler,
+  advanceAdlerBlock,
+  finalizeAdler,
+) where
+
+import Data.Bits (shiftL, (.|.))
 import qualified Data.ByteString as S
-import GHC.Exts ( Word#, plusWord#, remWord# )
-import GHC.Word ( Word8(..), Word32(..) )
+import GHC.Exts (Word#, plusWord#, remWord#)
+import GHC.Word (Word32 (..), Word8 (..))
 
-data AdlerState = AdlerState { _adlerA :: Word#, _adlerB :: Word# }
+data AdlerState = AdlerState {_adlerA :: Word#, _adlerB :: Word#}
 
 initialAdlerState :: AdlerState
 initialAdlerState = AdlerState 1## 0##
@@ -44,13 +45,13 @@ advanceAdlerBlock :: AdlerState -> S.ByteString -> AdlerState
 advanceAdlerBlock !state !bl
   | S.length bl == 0 = state
   | S.length bl == 1 = advanceAdler state (S.head bl)
-  | S.length bl < 5552 = advanceAdlerLimited state bl 
+  | S.length bl < 5552 = advanceAdlerLimited state bl
   | otherwise = advanceAdlerBlock (advanceAdlerBlock state first5551) rest
  where
   (!first5551, !rest) = S.splitAt 5551 bl
 
 finalizeAdler :: AdlerState -> Word32
 finalizeAdler (AdlerState a b) = high .|. low
-  where
-   high = (W32# b) `shiftL` 16
-   low = W32# a
+ where
+  high = (W32# b) `shiftL` 16
+  low = W32# a
