@@ -14,6 +14,13 @@ description:         A Haskell-only implementation of the zlib / DEFLATE
                      algorithm.
 extra-source-files: test/test-cases/*.z,
                     test/test-cases/*.gold
+tested-with:
+  GHC==8.0.2,
+  GHC==8.2.2,
+  GHC==8.4.4,
+  GHC==8.6.5,
+  GHC==8.8.4,
+  GHC==8.10.4
 
 library
   default-language:   Haskell2010
