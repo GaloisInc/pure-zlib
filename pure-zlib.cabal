@@ -52,6 +52,7 @@ executable deflate
                       base        >= 4.6   && < 5.0,
                       base-compat >= 0.9.1 && < 0.12,
                       bytestring  >= 0.10  && < 0.11,
+                      ghc-prim,
                       pure-zlib
 
 test-suite test-zlib

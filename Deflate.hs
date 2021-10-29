@@ -5,9 +5,11 @@ import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
 import Data.List(isSuffixOf)
 import GHC.IO(stToIO)
+import GHC.ST(ST)
+import GHC.Prim(RealWorld)
 import Prelude hiding (readFile, writeFile)
 import System.Environment(getArgs)
-import System.IO(IOMode(..), openFile, hClose)
+import System.IO(Handle, IOMode(..), openFile, hClose)
 
 main :: IO ()
 main =
@@ -23,6 +25,7 @@ main =
        _ ->
          putStrLn "USAGE: deflate [filename]"
 
+runDecompression :: Handle -> [S.ByteString] -> ST RealWorld (ZlibDecoder RealWorld) -> IO ()
 runDecompression hndl ls decoder = do
   nextState <- stToIO decoder
   case nextState of

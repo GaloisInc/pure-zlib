@@ -2,7 +2,7 @@ import Codec.Compression.Zlib
 import Codec.Compression.Zlib.Deflate
 import Data.ByteString.Lazy(readFile)
 import Data.Char (ord)
-import Data.List(last, isPrefixOf)
+import Data.List(isPrefixOf)
 import Prelude hiding (readFile)
 import System.FilePath
 import Test.Tasty
