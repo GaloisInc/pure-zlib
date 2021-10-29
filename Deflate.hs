@@ -1,11 +1,13 @@
+{-# LANGUAGE RankNTypes #-}
 import Codec.Compression.Zlib(ZlibDecoder(..), decompressIncremental)
 import Control.Monad(unless)
 import qualified Data.ByteString      as S
 import qualified Data.ByteString.Lazy as L
 import Data.List(isSuffixOf)
+import GHC.IO(stToIO)
 import Prelude hiding (readFile, writeFile)
 import System.Environment(getArgs)
-import System.IO(IOMode(..), Handle, openFile, hClose)
+import System.IO(IOMode(..), openFile, hClose)
 
 main :: IO ()
 main =
@@ -21,9 +23,9 @@ main =
        _ ->
          putStrLn "USAGE: deflate [filename]"
 
-runDecompression :: Handle -> [S.ByteString] -> ZlibDecoder -> IO ()
-runDecompression hndl ls decoder =
-  case decoder of
+runDecompression hndl ls decoder = do
+  nextState <- stToIO decoder
+  case nextState of
     Done ->
       do unless (null ls) $
            putStrLn "WARNING: Finished decompression with data left."
@@ -36,5 +38,5 @@ runDecompression hndl ls decoder =
       do putStrLn "ERROR: Ran out of data mid-decompression."
          hClose hndl
     Chunk c m ->
-      do L.hPut hndl c
+      do S.hPut hndl c
          runDecompression hndl ls m
