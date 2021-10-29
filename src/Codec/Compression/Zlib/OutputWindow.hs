@@ -17,157 +17,99 @@ module Codec.Compression.Zlib.OutputWindow(
 
 import Control.Monad(foldM)
 import qualified Data.ByteString      as S
-import Data.ByteString.Short.Internal(ShortByteString(SBS), fromShort, toShort)
+import qualified Data.ByteString.Short      as SBS
+import Data.ByteString.Short.Internal(ShortByteString(SBS))
 import qualified Data.ByteString.Lazy as L
-import GHC.Exts
-    ( Int#,
-      Int(..),
-      ByteArray#,
-      MutableByteArray#,
-      Word#,
-      (+#),
-      (-#),
-      (<#),
-      (>#),
-      (<=#),
-      (>=#),
-      isTrue#,
-      newPinnedByteArray#,
-      shrinkMutableByteArray#,
-      unsafeFreezeByteArray#,
-      sizeofByteArray#,
-      sizeofMutableByteArray#,
-      writeWord8Array#,
-      copyByteArray#,
-      copyMutableByteArray# )
-import GHC.Int ( Int64(..) )
 import GHC.ST ( ST(..) )
 import GHC.Word ( Word8(..) )
+import qualified Data.Vector.Primitive as V
+import qualified Data.Vector.Primitive.Mutable as MV
+import qualified Data.Primitive as Prim
 
 windowSize :: Int
 windowSize = 128 * 1024
 
 data OutputWindow s = OutputWindow {
-       owWindow    :: MutableByteArray# s 
-     , owNext      :: Int#
+       owWindow :: {-# UNPACK #-} !(MV.MVector s Word8)
+     , owNext :: {-# UNPACK #-} !Int
      }
 
 emptyWindow :: ST s (OutputWindow s)
 emptyWindow =
-  do MBA window <- newBuffer "emptyWindow" unliftedSize
-     return (OutputWindow window 0#) 
- where
-  !(I# unliftedSize) = windowSize
+  do window <- MV.new windowSize
+     return (OutputWindow window 0)
+
+excessChunkSize :: Int
+excessChunkSize = 32768
 
 emitExcess :: OutputWindow s -> ST s (Maybe (S.ByteString, OutputWindow s))
 emitExcess OutputWindow{ owWindow = window, owNext = initialOffset }
- | isTrue# (initialOffset <# 65536#) = return Nothing 
+ | initialOffset < excessChunkSize * 2 = return Nothing
  | otherwise =
-    do BA ba <- freeze window 0# 32768#
-       () <- copy "emitExcess" window 32768# window 0# (initialOffset -# 32768#)
-       let ow' = OutputWindow window (initialOffset -# 32768#)
-           bstr = toByteString ba
-       return (Just (bstr, ow'))
+    do toEmit <- V.freeze $ MV.slice 0 excessChunkSize window
+       let excessLength = initialOffset - excessChunkSize
+       -- Need move as these can overlap!
+       MV.move (MV.slice 0 excessLength window) (MV.slice excessChunkSize excessLength window)
+       let ow' = OutputWindow window excessLength
+       return (Just (SBS.fromShort $ toByteString toEmit, ow'))
 
 finalizeWindow :: OutputWindow s -> ST s S.ByteString
-finalizeWindow ow = ST $ \ s0 ->
-  case shrinkMutableByteArray# (owWindow ow) (owNext ow) s0 of
-    s1 ->
-      case unsafeFreezeByteArray# (owWindow ow) s1 of
-        (# s2, resultBA #) ->
-          (# s2, fromShort (SBS resultBA) #)
+finalizeWindow ow = do
+  -- safe as we're doing it at the end
+  res <- V.unsafeFreeze (MV.slice 0 (owNext ow) (owWindow ow))
+  pure $ SBS.fromShort $ toByteString res
 
 -- -----------------------------------------------------------------------------
 
 addByte :: OutputWindow s -> Word8 -> ST s (OutputWindow s)
-addByte !ow (W8# b) = do
+addByte !ow !b = do
   let offset = owNext ow
-  () <- writeByte (owWindow ow) offset b
-  return ow{ owNext = offset +# 1# }
+  MV.write (owWindow ow) offset b
+  return ow{ owNext = offset + 1 }
 
 addChunk :: OutputWindow s -> L.ByteString -> ST s (OutputWindow s)
 addChunk !ow !bs = foldM copyChunk ow (L.toChunks bs)
 
 copyChunk :: OutputWindow s -> S.ByteString -> ST s (OutputWindow s)
 copyChunk ow sbstr = do
-  let !(SBS ba) = toShort sbstr
-      chunkSize = sizeofByteArray# ba
-      offset = owNext ow
-  () <- copyFrozen "copyChunk" ba 0# (owWindow ow) offset chunkSize
-  return ow{ owNext = offset +# chunkSize }
+  -- safe as we're never going to look at this again
+  ba <- V.unsafeThaw $ fromByteString $ SBS.toShort sbstr
+  let offset = owNext ow
+      len = MV.length ba
+  MV.copy (MV.slice offset len (owWindow ow)) ba
+  return ow{ owNext = offset + len }
 
-addOldChunk :: OutputWindow s -> Int -> Int64 -> ST s (OutputWindow s, S.ByteString)
-addOldChunk (OutputWindow window next) (I# dist) (I64# len) = do
-  () <- copy "addOldChunk/copyToWindow" window (next -# dist) window next len
-  BA resultBA <- freeze window (next -# dist) len
-  return (OutputWindow window (next +# len), toByteString resultBA)
+addOldChunk :: OutputWindow s -> Int -> Int -> ST s (OutputWindow s, S.ByteString)
+addOldChunk (OutputWindow window next) dist len = do
+  -- zlib can ask us to copy an "old" chunk that extends past our current offset.
+  -- The intention is that we then start copying the "new" data we just copied into
+  -- place. 'copyChunked' handles this for us.
+  copyChunked (MV.slice next len window) (MV.slice (next-dist) len window) dist
+  result <- V.freeze $ MV.slice next len window
+  return (OutputWindow window (next + len), SBS.fromShort $ toByteString result)
 
--- -----------------------------------------------------------------------------
--- Bounds checked (or slightly lifted) versions of various primitives
+-- | A copy function that copies the buffers sequentially in chunks no larger than
+-- the stated size. This allows us to handle the insane zlib behaviour.
+copyChunked :: MV.MVector s Word8 -> MV.MVector s Word8 -> Int -> ST s ()
+copyChunked dest src chunkSize = go 0 (MV.length src)
+  where
+    go _ 0 = pure ()
+    go copied toCopy = do
+      let thisChunkSize = min toCopy chunkSize
+      MV.copy (MV.slice copied thisChunkSize dest) (MV.slice copied thisChunkSize src)
+      go (copied+thisChunkSize) (toCopy-thisChunkSize)
 
-data BA = BA ByteArray#
-data MBA s = MBA (MutableByteArray# s)
+-- TODO: these are a bit questionable. Maybe we can just pass around Vector Word8 in the client code?
+fromByteString :: SBS.ShortByteString -> V.Vector Word8
+fromByteString (SBS ba) =
+  let
+    len = Prim.sizeofByteArray (Prim.ByteArray ba)
+    sz = Prim.sizeOf (undefined :: Word8)
+  in V.Vector 0 (len*sz) (Prim.ByteArray ba)
 
-toByteString :: ByteArray# -> S.ByteString 
-toByteString ba = fromShort (SBS ba)
-
-newBuffer :: String -> Int# -> ST s (MBA s)
-newBuffer src size = ST $ \ s0 ->
-  case size <=# 0# of
-    0# -> case newPinnedByteArray# size s0 of
-            (# s1, res #) -> (# s1, MBA res #)
-    _ -> error ("newBuffer/" ++ src ++ ": Got a buffer size <= 0")
-
-copy :: String -> MutableByteArray# s -> Int# -> MutableByteArray# s -> Int# -> Int# -> ST s ()
-copy src srcBuffer srcOff destBuffer destOff amt = 
-  let srcBufferSize = sizeofMutableByteArray# srcBuffer
-      destBufferSize = sizeofMutableByteArray# destBuffer
-  in if | isTrue# (srcBufferSize <# (srcOff +# amt)) -> error ("copy/" ++ src ++ ": source buffer isn't big enough to handle offset + amt (" ++ show (I# srcBufferSize) ++ " < " ++ "(" ++ show (I# srcOff) ++ " + " ++ show (I# amt) ++ "))")
-        | isTrue# (destBufferSize <# (destOff +# amt))  -> error ("copy/" ++ src ++ ": destination buffer isn't big enough to handle offset + amt")
-        | isTrue# (srcOff <# 0#) -> error ("copy/" ++ src ++ ": negative source offset")
-        | isTrue# (destOff <# 0#) -> error ("copy/" ++ src ++ ": negative destination offset")
-        | isTrue# (amt <# 0#) -> error ("copy/" ++ src ++ ": negative amount to copy")
-        | isTrue# ((srcOff +# amt) ># destOff) && isTrue# (srcOff <# destOff)-> do
-           -- this is a moderately bonkers case that zlib allows. what is supposed to happen,
-           -- I guess, is that bytes are written one by one so that by the time we catch up
-           -- to the beginning, we've written the bytes we'll then copy. to deal with this
-           -- we're going to break up the case so that first we copy the part we have, then
-           -- we try again.
-           let firstAmt = destOff -# srcOff
-           copy (src ++ "H") srcBuffer srcOff destBuffer destOff firstAmt
-           copy (src ++ "'") srcBuffer srcOff destBuffer (destOff +# firstAmt) (amt -# firstAmt)
-        | otherwise -> ST $ \ s0 ->
-            case copyMutableByteArray# srcBuffer srcOff destBuffer destOff amt s0 of
-              s1 -> (# s1, () #)
-
-copyFrozen :: String -> ByteArray# -> Int# -> MutableByteArray# s -> Int# -> Int# -> ST s ()
-copyFrozen src srcBuffer srcOff destBuffer destOff amt = ST $ \ s ->
-  let srcBufferSize = sizeofByteArray# srcBuffer
-      destBufferSize = sizeofMutableByteArray# destBuffer
-  in if | isTrue# (srcBufferSize <# (srcOff +# amt)) -> error ("copyFrozen/" ++ src ++ ": source buffer isn't big enough to handle offset + amt (" ++ show (I# srcBufferSize) ++ " < " ++ "(" ++ show (I# srcOff) ++ " + " ++ show (I# amt) ++ "))")
-        | isTrue# (destBufferSize <# (destOff +# amt))  -> error ("copyFrozen/" ++ src ++ ": destination buffer isn't big enough to handle offset + amt")
-        | isTrue# (srcOff <# 0#) -> error ("copyFrozen/" ++ src ++ ": negative source offset")
-        | isTrue# (destOff <# 0#) -> error ("copyFrozen/" ++ src ++ ": negative source offset")
-        | otherwise ->
-            case copyByteArray# srcBuffer srcOff destBuffer destOff amt s of
-              s1 -> (# s1, () #)
-
-freeze :: MutableByteArray# s -> Int# -> Int# -> ST s BA
-freeze buffer off len
-  | isTrue# (len <=# 0#) = error "Freeze passed a buffer of 0 or negative size"
-  | isTrue# (sizeofMutableByteArray# buffer <=# (off +# len)) = error "Freeze passed an offset/length greater than the buffer size"
-  | otherwise = ST $ \ s0 ->
-      case newPinnedByteArray# len s0 of
-        (# s1, mba #) ->
-          case copyMutableByteArray# buffer off mba 0# len s1 of
-            s2 ->
-              case unsafeFreezeByteArray# mba s2 of
-                (# s3, ba #) -> (# s3, BA ba #)
-
-writeByte :: MutableByteArray# s -> Int# -> Word# -> ST s ()
-writeByte buffer off b
-  | isTrue# (off <# 0#) = error "writeByte to negative offset"
-  | isTrue# (off >=# sizeofMutableByteArray# buffer) = error "writeByte after end of array"
-  | otherwise = ST $ \ s ->
-      case writeWord8Array# buffer off b s of 
-        s' -> (# s', () #)
+toByteString :: V.Vector Word8 -> SBS.ShortByteString
+toByteString (V.Vector offset len ba) =
+    let
+      sz = Prim.sizeOf (undefined :: Word8)
+      !(Prim.ByteArray ba') = Prim.cloneByteArray ba (offset*sz) (len*sz)
+    in SBS ba'
