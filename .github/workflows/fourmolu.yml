@@ -8,13 +8,6 @@ jobs:
     runs-on: ubuntu-18.04
     container:
       image: buildpack-deps:xenial
-    continue-on-error: ${{ matrix.allow-failure }}
-    strategy:
-      matrix:
-        include:
-          - compiler: ghc-8.10.4
-            allow-failure: false
-      fail-fast: false
     steps:
       - name: apt
         run: |
@@ -22,16 +15,14 @@ jobs:
           apt-get install -y --no-install-recommends gnupg ca-certificates dirmngr curl git software-properties-common
           apt-add-repository -y 'ppa:hvr/ghc'
           apt-get update
-          apt-get install -y $CC cabal-install-3.4
-        env:
-          CC: ${{ matrix.compiler }}
+          apt-get install -y ghc-8.10.4 cabal-install-3.4
       - name: Set PATH and environment variables
         run: |
           echo "$HOME/.cabal/bin" >> $GITHUB_PATH
           echo "LANG=C.UTF-8" >> $GITHUB_ENV
           echo "CABAL_DIR=$HOME/.cabal" >> $GITHUB_ENV
           echo "CABAL_CONFIG=$HOME/.cabal/config" >> $GITHUB_ENV
-          HCDIR=$(echo "/opt/$CC" | sed 's/-/\//')
+          HCDIR=$(echo "/opt/ghc-8.10.4" | sed 's/-/\//')
           HCNAME=ghc
           HC=$HCDIR/bin/$HCNAME
           echo "HC=$HC" >> $GITHUB_ENV
@@ -45,8 +36,6 @@ jobs:
           echo "HEADHACKAGE=false" >> $GITHUB_ENV
           echo "ARG_COMPILER=--$HCNAME --with-compiler=$HC" >> $GITHUB_ENV
           echo "GHCJSARITH=0" >> $GITHUB_ENV
-        env:
-          CC: ${{ matrix.compiler }}
       - name: env
         run: |
           env
@@ -80,7 +69,7 @@ jobs:
           $CABAL v2-update -v
       - name: install fourmolu
         run: |
-          $CABAL install fourmolu
+          $CABAL install $ARG_COMPILER fourmolu
       - name: checkout
         uses: actions/checkout@v2
         with:
