@@ -109,14 +109,14 @@ inflateBlock fixedLitTree fixedDistanceTree = do
     code <- nextCode litTree
     case compare code 256 of
       LT -> do
-        emitByte (fromIntegral code)
+        trace "byte" $ emitByte (fromIntegral code)
         runInflate litTree distTree
       EQ -> return ()
       GT -> do
         len <- getLength code
         distCode <- nextCode distTree
         dist <- getDistance distCode
-        emitPastChunk dist (fromIntegral len)
+        trace ("past len " ++ show len ++ " dist " ++ show dist) (emitPastChunk dist (fromIntegral len))
         moveWindow
         runInflate litTree distTree
 
