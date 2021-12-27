@@ -35,6 +35,7 @@ import qualified Data.IntMap.Strict as Map
 import Data.List (sortBy)
 import Data.Word (Word8)
 import Numeric (showHex)
+import Debug.Trace(trace)
 
 inflate :: DeflateM s ()
 inflate = do
@@ -69,7 +70,7 @@ inflateBlock fixedLitTree fixedDistanceTree = do
   case btype :: Word8 of
     0 -> do
       -- no compression
-      advanceToByte
+      trace "uncompressed" advanceToByte
       len <- nextWord16
       nlen <- nextWord16
       unless (len == complement nlen) $
@@ -78,7 +79,7 @@ inflateBlock fixedLitTree fixedDistanceTree = do
       return bfinal
     1 -> do
       -- compressed with fixed Huffman codes
-      runInflate fixedLitTree fixedDistanceTree
+      trace "standard" $ runInflate fixedLitTree fixedDistanceTree
       return bfinal
     2 -> do
       -- compressed with dynamic Huffman codes
@@ -97,7 +98,7 @@ inflateBlock fixedLitTree fixedDistanceTree = do
           distlens = Map.mapKeys (\k -> k - hlit) offdistlens
       litTree <- computeHuffmanTree (Map.toList litlens)
       distTree <- computeHuffmanTree (Map.toList distlens)
-      runInflate litTree distTree
+      trace "custom" $ runInflate litTree distTree
       return bfinal
     _ ->
       -- reserved / error
